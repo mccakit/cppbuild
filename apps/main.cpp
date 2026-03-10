@@ -59,12 +59,12 @@ int main()
     g.add_edge(target13, target17, 1);
     g.add_edge(target15, target17, 1);
     g.add_edge(target16, target17, 1);
-    // emit naive compile_commands.json
+    // emit P1689.json for clang-scan-deps (named modules only)
     const std::string dir = std::filesystem::current_path().string();
     const std::string cxx = "clang++";
     std::string flags = "-std=c++20 -x c++";
     {
-        auto f = fmt::output_file("compile_commands.json");
+        auto f = fmt::output_file("P1689.json");
         f.print("[\n");
         const auto &vertices = g.get_vertices();
         std::vector<std::pair<graaf::vertex_id_t, target>> filtered;
@@ -74,8 +74,8 @@ int main()
         std::size_t i = 0;
         for (const auto &[id, t] : filtered)
         {
-            f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -c {}\",\"file\":\"{}\"}}{}", dir, cxx, flags, t.src,
-                    t.src, i + 1 < filtered.size() ? ",\n" : "\n");
+            f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -c {}\",\"file\":\"{}\",\"output\":\"{}.o\"}}{}", dir, cxx, flags, t.src,
+                    t.src, t.src, i + 1 < filtered.size() ? ",\n" : "\n");
             ++i;
         }
         f.print("]\n");
@@ -83,7 +83,7 @@ int main()
     // scan module deps
     std::string scan_output;
     {
-        FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database compile_commands.json", "r");
+        FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database P1689.json", "r");
         if (!pipe)
             return 1;
         char buf[4096];
@@ -108,6 +108,44 @@ int main()
                     g.get_vertex(id).mname = std::string(name);
         }
     }
+
+    // emit compile_commands.json for clangd (all compilable sources)
+    {
+        auto f = fmt::output_file("compile_commands.json");
+        f.print("[\n");
+        std::vector<std::pair<graaf::vertex_id_t, target>> sources;
+        for (const auto &[id, t] : g.get_vertices())
+            if (t.type == "named_module" || t.type == "translation_unit")
+                sources.emplace_back(id, t);
+        std::size_t i = 0;
+        for (const auto &[id, t] : sources)
+        {
+            std::string cmd = fmt::format("{} -std=c++26 -fprebuilt-module-path=. -c {}", cxx, t.src);
+            // add -fmodule-file= for header unit deps
+            std::set<graaf::vertex_id_t> visited;
+            std::stack<graaf::vertex_id_t> stk;
+            for (auto dep_id : g.get_predecessors(id))
+                stk.push(dep_id);
+            while (!stk.empty())
+            {
+                auto cur = stk.top(); stk.pop();
+                if (visited.contains(cur)) continue;
+                visited.insert(cur);
+                const auto &dep = g.get_vertex(cur);
+                if (dep.type == "header_unit")
+                {
+                    cmd += fmt::format(" -fmodule-file={}.pcm", dep.src);
+                    for (auto dep_id : g.get_predecessors(cur))
+                        stk.push(dep_id);
+                }
+            }
+            f.print("  {{\"directory\":\"{}\",\"command\":\"{}\",\"file\":\"{}\"}}{}", dir, cmd, t.src,
+                    i + 1 < sources.size() ? ",\n" : "\n");
+            ++i;
+        }
+        f.print("]\n");
+    }
+
     // print results
     for (auto &[id, t] : g.get_vertices())
         fmt::println("{} -> module '{}'", t.src, t.mname);
