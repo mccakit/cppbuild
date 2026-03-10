@@ -3,6 +3,8 @@
 #include <fmt/ranges.h>
 #include <graaflib/graaflib.hpp>
 #include <simdjson.h>
+#include <umka_api.h>
+
 import std;
 struct target
 {
@@ -11,16 +13,37 @@ struct target
         std::string mname;
         std::string type;
 };
-auto is_header = [](const std::string &src) {
-    static const std::array exts = {".h", ".hh", ".hpp", ".hxx", ".h++"};
-    auto dot = src.rfind('.');
-    if (dot == std::string::npos)
-        return false;
-    std::string ext = src.substr(dot);
-    return std::ranges::any_of(exts, [&](auto e) { return ext == e; });
-};
-int main()
+
+int main(int argc, char **argv)
 {
+    const std::string script = argv[1];
+    Umka *umka = umkaAlloc();
+    if (!umkaInit(umka, script.c_str(), nullptr, 65536, nullptr, 0, nullptr, true, true, nullptr))
+    {
+        return 1;
+    }
+    if (!umkaCompile(umka))
+    {
+        return 1;
+    }
+    if (umkaRun(umka) != 0)
+    {
+        return 1;
+    }
+    UmkaFuncContext umka_fn;
+    if (!umkaGetFunc(umka, nullptr, "greet", &umka_fn))
+    {
+        return 1;
+    }
+    UmkaStackSlot resultSlot = {};
+    umka_fn.params = nullptr;
+    umka_fn.result = &resultSlot;
+    if (!umkaCall(umka, &umka_fn))
+    {
+        return 1;
+    }
+    fmt::println("got: {}", static_cast<const char *>(resultSlot.ptrVal));
+    umkaFree(umka);
     // configure
     graaf::directed_graph<target, int> g;
     // named module diamond
@@ -34,15 +57,15 @@ int main()
     g.add_edge(target2, target5, 1);
     const auto target6 = g.add_vertex(target{.src = "app0.cpp", .mname = "", .type = "translation_unit"});
     g.add_edge(target5, target6, 1);
-    const auto target7  = g.add_vertex(target{.src = "app0", .mname = "", .type = "exe"});
+    const auto target7 = g.add_vertex(target{.src = "app0", .mname = "", .type = "exe"});
     g.add_edge(target6, target7, 1);
 
     // header unit diamond
-    const auto target8  = g.add_vertex(target{.src = "h1.hpp", .mname = "", .type = "header_unit"});
-    const auto target9  = g.add_vertex(target{.src = "h1.cpp", .mname = "", .type = "translation_unit"});
-    const auto target10 = g.add_vertex(target{.src = "h2.h",   .mname = "", .type = "header_unit"});
+    const auto target8 = g.add_vertex(target{.src = "h1.hpp", .mname = "", .type = "header_unit"});
+    const auto target9 = g.add_vertex(target{.src = "h1.cpp", .mname = "", .type = "translation_unit"});
+    const auto target10 = g.add_vertex(target{.src = "h2.h", .mname = "", .type = "header_unit"});
     const auto target11 = g.add_vertex(target{.src = "h2.cpp", .mname = "", .type = "translation_unit"});
-    const auto target12 = g.add_vertex(target{.src = "h3.hh",  .mname = "", .type = "header_unit"});
+    const auto target12 = g.add_vertex(target{.src = "h3.hh", .mname = "", .type = "header_unit"});
     const auto target13 = g.add_vertex(target{.src = "h3.cpp", .mname = "", .type = "translation_unit"});
     g.add_edge(target8, target10, 1);
     g.add_edge(target8, target12, 1);
@@ -74,8 +97,8 @@ int main()
         std::size_t i = 0;
         for (const auto &[id, t] : filtered)
         {
-            f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -c {}\",\"file\":\"{}\",\"output\":\"{}.o\"}}{}", dir, cxx, flags, t.src,
-                    t.src, t.src, i + 1 < filtered.size() ? ",\n" : "\n");
+            f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -c {}\",\"file\":\"{}\",\"output\":\"{}.o\"}}{}", dir,
+                    cxx, flags, t.src, t.src, t.src, i + 1 < filtered.size() ? ",\n" : "\n");
             ++i;
         }
         f.print("]\n");
@@ -128,8 +151,10 @@ int main()
                 stk.push(dep_id);
             while (!stk.empty())
             {
-                auto cur = stk.top(); stk.pop();
-                if (visited.contains(cur)) continue;
+                auto cur = stk.top();
+                stk.pop();
+                if (visited.contains(cur))
+                    continue;
                 visited.insert(cur);
                 const auto &dep = g.get_vertex(cur);
                 if (dep.type == "header_unit")
@@ -220,8 +245,10 @@ int main()
                 stk.push(dep_id);
             while (!stk.empty())
             {
-                auto cur = stk.top(); stk.pop();
-                if (visited.contains(cur)) continue;
+                auto cur = stk.top();
+                stk.pop();
+                if (visited.contains(cur))
+                    continue;
                 visited.insert(cur);
                 const auto &dep = g.get_vertex(cur);
                 if (dep.type == "header_unit")
@@ -258,8 +285,10 @@ int main()
         stack.push(id);
         while (!stack.empty())
         {
-            auto cur = stack.top(); stack.pop();
-            if (visited.contains(cur)) continue;
+            auto cur = stack.top();
+            stack.pop();
+            if (visited.contains(cur))
+                continue;
             visited.insert(cur);
             const auto &vt = g.get_vertex(cur);
             if (vt.type == "translation_unit")
