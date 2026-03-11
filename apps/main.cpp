@@ -13,10 +13,37 @@ struct target
         std::string mname;
         std::string type;
 };
-struct umka_intarray {
-    const UmkaType *type;
-    int64_t itemSize;
-    int64_t *data;
+struct umka_strarr
+{
+    public:
+        const UmkaType *type;
+        int64_t itemSize;
+        const char **data;
+};
+
+struct umka_target
+{
+    public:
+        const char *name;
+        const char *src;
+        const char *type;
+        umka_strarr deps;
+};
+
+struct umka_result
+{
+    public:
+        const UmkaType *type;
+        int64_t itemSize;
+        umka_target *data;
+};
+
+struct umka_target_cxx
+{
+        std::string name;
+        std::string src;
+        std::string type;
+        std::vector<std::string> deps;
 };
 int main(int argc, char **argv)
 {
@@ -44,61 +71,53 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    umka_intarray result_storage = {};
-    UmkaStackSlot resultSlot = {};
-    resultSlot.ptrVal = &result_storage;
-    umka_fn.result = &resultSlot;
-
+    umka_result result_storage{};
+    UmkaStackSlot result_slot = {};
+    result_slot.ptrVal = &result_storage;
+    umka_fn.result = &result_slot;
     if (umkaCall(umka, &umka_fn) != 0)
     {
         fmt::print("umkaCall failed: {}\n", umkaGetError(umka)->msg);
         return 1;
     }
-
-    fmt::print("ptrVal={}\n", resultSlot.ptrVal);
-    auto* header = (umka_intarray*)resultSlot.ptrVal;
+    auto *header = (umka_result *)result_slot.ptrVal;
     int len = umkaGetDynArrayLen(header);
-    std::vector<int64_t> result {header->data, header->data + len};
-    fmt::print("result: {}\n", fmt::join(result, " "));
-    umkaDecRef(umka, result_storage.data);
-    umkaFree(umka);    // configure
-    graaf::directed_graph<target, int> g;
-    // named module diamond
-    const auto target1 = g.add_vertex(target{.src = "m4.c++", .mname = "", .type = "named_module"});
-    const auto target2 = g.add_vertex(target{.src = "m3.cppm", .mname = "", .type = "named_module"});
-    g.add_edge(target1, target2, 1);
-    const auto target3 = g.add_vertex(target{.src = "m2.cc", .mname = "", .type = "named_module"});
-    g.add_edge(target1, target3, 1);
-    const auto target5 = g.add_vertex(target{.src = "m1.cpp", .mname = "", .type = "named_module"});
-    g.add_edge(target3, target5, 1);
-    g.add_edge(target2, target5, 1);
-    const auto target6 = g.add_vertex(target{.src = "app0.cpp", .mname = "", .type = "translation_unit"});
-    g.add_edge(target5, target6, 1);
-    const auto target7 = g.add_vertex(target{.src = "app0", .mname = "", .type = "exe"});
-    g.add_edge(target6, target7, 1);
 
-    // header unit diamond
-    const auto target8 = g.add_vertex(target{.src = "h1.hpp", .mname = "", .type = "header_unit"});
-    const auto target9 = g.add_vertex(target{.src = "h1.cpp", .mname = "", .type = "translation_unit"});
-    const auto target10 = g.add_vertex(target{.src = "h2.h", .mname = "", .type = "header_unit"});
-    const auto target11 = g.add_vertex(target{.src = "h2.cpp", .mname = "", .type = "translation_unit"});
-    const auto target12 = g.add_vertex(target{.src = "h3.hh", .mname = "", .type = "header_unit"});
-    const auto target13 = g.add_vertex(target{.src = "h3.cpp", .mname = "", .type = "translation_unit"});
-    g.add_edge(target8, target10, 1);
-    g.add_edge(target8, target12, 1);
-    const auto target14 = g.add_vertex(target{.src = "h4.h++", .mname = "", .type = "header_unit"});
-    const auto target15 = g.add_vertex(target{.src = "h4.cpp", .mname = "", .type = "translation_unit"});
-    g.add_edge(target10, target14, 1);
-    g.add_edge(target12, target14, 1);
-    const auto target16 = g.add_vertex(target{.src = "app1.cpp", .mname = "", .type = "translation_unit"});
-    g.add_edge(target14, target16, 1);
-    const auto target17 = g.add_vertex(target{.src = "app1", .mname = "", .type = "exe"});
-    // impl cpps and app all just link together
-    g.add_edge(target9, target17, 1);
-    g.add_edge(target11, target17, 1);
-    g.add_edge(target13, target17, 1);
-    g.add_edge(target15, target17, 1);
-    g.add_edge(target16, target17, 1);
+    std::vector<umka_target_cxx> result;
+    for (int i = 0; i < len; i++)
+    {
+        auto &t = header->data[i];
+        int dep_len = umkaGetDynArrayLen(&t.deps);
+        std::vector<std::string> deps;
+        for (int j = 0; j < dep_len; j++)
+            deps.push_back(t.deps.data[j]);
+        result.push_back({t.name, t.src, t.type, std::move(deps)});
+    }
+
+    for (auto &t : result)
+    {
+        fmt::print("name={} src={} type={} deps=[{}]\n", t.name, t.src, t.type, fmt::join(t.deps, ", "));
+    }
+
+    for (int i = 0; i < len; i++)
+        umkaDecRef(umka, header->data[i].deps.data);
+    umkaDecRef(umka, result_storage.data);
+    umkaFree(umka); // configure
+    //build graph
+    graaf::directed_graph<target, int> g;
+    std::unordered_map<std::string, graaf::vertex_id_t> vertices;
+    for (auto &t : result)
+    {
+        vertices[t.name] = g.add_vertex(target{.src = t.src, .mname = "", .type = t.type});
+        fmt::print("add_vertex: name={} src={} type={} id={}\n", t.name, t.src, t.type, vertices[t.name]);
+    }
+
+    for (auto &t : result)
+        for (auto &dep : t.deps)
+        {
+            g.add_edge(vertices[t.name], vertices[dep], 1);
+            fmt::print("add_edge: {} -> {} ({}->{})\n", t.name, dep, vertices[t.name], vertices[dep]);
+        }
     // emit P1689.json for clang-scan-deps (named modules only)
     const std::string dir = std::filesystem::current_path().string();
     const std::string cxx = "clang++";
@@ -164,7 +183,7 @@ int main(int argc, char **argv)
             // add -fmodule-file= for header unit deps
             std::set<graaf::vertex_id_t> visited;
             std::stack<graaf::vertex_id_t> stk;
-            for (auto dep_id : g.get_predecessors(id))
+            for (auto dep_id : g.get_neighbors(id))
                 stk.push(dep_id);
             while (!stk.empty())
             {
@@ -177,7 +196,7 @@ int main(int argc, char **argv)
                 if (dep.type == "header_unit")
                 {
                     cmd += fmt::format(" -fmodule-file={}.pcm", dep.src);
-                    for (auto dep_id : g.get_predecessors(cur))
+                    for (auto dep_id : g.get_neighbors(cur))
                         stk.push(dep_id);
                 }
             }
@@ -208,7 +227,7 @@ int main(int argc, char **argv)
     nf.print("  description = OBJ $out\n");
 
     nf.print("rule precompile_header_unit\n");
-    nf.print("  command = {} {} -x c++-header -fmodule-header $in -o $out\n", cxx, flags);
+    nf.print("  command = {} {} -x c++-header -fmodule-header -Wexperimental-header-units $in -o $out\n", cxx, flags);
     nf.print("  description = PCM $out\n");
 
     nf.print("rule compile_src\n");
@@ -218,7 +237,7 @@ int main(int argc, char **argv)
     for (auto id : *order)
     {
         const auto &t = g.get_vertex(id);
-        const auto &deps = g.get_predecessors(id);
+        const auto &deps = g.get_neighbors(id);
 
         if (t.type == "named_module")
         {
@@ -243,7 +262,7 @@ int main(int argc, char **argv)
     for (auto id : *order)
     {
         const auto &t = g.get_vertex(id);
-        const auto &deps = g.get_predecessors(id);
+        const auto &deps = g.get_neighbors(id);
 
         if (t.type == "named_module")
         {
@@ -272,7 +291,7 @@ int main(int argc, char **argv)
                 {
                     dep_pcms += fmt::format(" {}.pcm", dep.src);
                     header_unit_flags += fmt::format(" -fmodule-file={}.pcm", dep.src);
-                    for (auto dep_id : g.get_predecessors(cur))
+                    for (auto dep_id : g.get_neighbors(cur))
                         stk.push(dep_id);
                 }
                 else if (dep.type == "named_module")
@@ -312,7 +331,7 @@ int main(int argc, char **argv)
                 objs += fmt::format(" {}", vt.src.substr(0, vt.src.rfind('.')) + ".o");
             else if (vt.type == "named_module")
                 objs += fmt::format(" {}.o", vt.mname);
-            for (auto dep_id : g.get_predecessors(cur))
+            for (auto dep_id : g.get_neighbors(cur))
                 stack.push(dep_id);
         }
         nf.print("build {}: link {}\n", t.src, objs);
