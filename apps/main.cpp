@@ -13,38 +13,55 @@ struct target
         std::string mname;
         std::string type;
 };
-
+struct umka_intarray {
+    const UmkaType *type;
+    int64_t itemSize;
+    int64_t *data;
+};
 int main(int argc, char **argv)
 {
     const std::string script = argv[1];
     Umka *umka = umkaAlloc();
     if (!umkaInit(umka, script.c_str(), nullptr, 65536, nullptr, 0, nullptr, true, true, nullptr))
     {
+        fmt::print("umkaInit failed: {}\n", umkaGetError(umka)->msg);
         return 1;
     }
     if (!umkaCompile(umka))
     {
+        fmt::print("umkaCompile failed: {}\n", umkaGetError(umka)->msg);
         return 1;
     }
     if (umkaRun(umka) != 0)
     {
+        fmt::print("umkaRun failed: {}\n", umkaGetError(umka)->msg);
         return 1;
     }
-    UmkaFuncContext umka_fn;
+    UmkaFuncContext umka_fn = {0};
     if (!umkaGetFunc(umka, nullptr, "greet", &umka_fn))
     {
+        fmt::print("umkaGetFunc failed\n");
         return 1;
     }
+
+    umka_intarray result_storage = {};
     UmkaStackSlot resultSlot = {};
-    umka_fn.params = nullptr;
+    resultSlot.ptrVal = &result_storage;
     umka_fn.result = &resultSlot;
-    if (!umkaCall(umka, &umka_fn))
+
+    if (umkaCall(umka, &umka_fn) != 0)
     {
+        fmt::print("umkaCall failed: {}\n", umkaGetError(umka)->msg);
         return 1;
     }
-    fmt::println("got: {}", static_cast<const char *>(resultSlot.ptrVal));
-    umkaFree(umka);
-    // configure
+
+    fmt::print("ptrVal={}\n", resultSlot.ptrVal);
+    auto* header = (umka_intarray*)resultSlot.ptrVal;
+    int len = umkaGetDynArrayLen(header);
+    std::vector<int64_t> result {header->data, header->data + len};
+    fmt::print("result: {}\n", fmt::join(result, " "));
+    umkaDecRef(umka, result_storage.data);
+    umkaFree(umka);    // configure
     graaf::directed_graph<target, int> g;
     // named module diamond
     const auto target1 = g.add_vertex(target{.src = "m4.c++", .mname = "", .type = "named_module"});
