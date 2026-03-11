@@ -65,7 +65,7 @@ int main(int argc, char **argv)
         return 1;
     }
     UmkaFuncContext umka_fn = {0};
-    if (!umkaGetFunc(umka, nullptr, "greet", &umka_fn))
+    if (!umkaGetFunc(umka, nullptr, "configure", &umka_fn))
     {
         fmt::print("umkaGetFunc failed\n");
         return 1;
@@ -103,25 +103,33 @@ int main(int argc, char **argv)
         umkaDecRef(umka, header->data[i].deps.data);
     umkaDecRef(umka, result_storage.data);
     umkaFree(umka); // configure
-    //build graph
+    // build graph
     graaf::directed_graph<target, int> g;
     std::unordered_map<std::string, graaf::vertex_id_t> vertices;
     for (auto &t : result)
     {
-        vertices[t.name] = g.add_vertex(target{.src = t.src, .mname = "", .type = t.type});
-        fmt::print("add_vertex: name={} src={} type={} id={}\n", t.name, t.src, t.type, vertices[t.name]);
+        vertices[t.src] = g.add_vertex(target{.src = t.src, .mname = "", .type = t.type});
+        fmt::print("add_vertex: name={} src={} type={} id={}\n", t.name, t.src, t.type, vertices[t.src]);
     }
-
     for (auto &t : result)
+    {
         for (auto &dep : t.deps)
         {
-            g.add_edge(vertices[t.name], vertices[dep], 1);
-            fmt::print("add_edge: {} -> {} ({}->{})\n", t.name, dep, vertices[t.name], vertices[dep]);
+            for (auto &t2 : result)
+            {
+                if (t2.name == dep)
+                {
+                    g.add_edge(vertices[t.src], vertices[t2.src], 1);
+                    fmt::print("add_edge: {} -> {} ({}->{})\n", t.src, t2.src, vertices[t.src], vertices[t2.src]);
+                }
+            }
         }
+    }
+
     // emit P1689.json for clang-scan-deps (named modules only)
     const std::string dir = std::filesystem::current_path().string();
     const std::string cxx = "clang++";
-    std::string flags = "-std=c++20 -x c++";
+    std::string flags = "-std=c++26 -x c++";
     {
         auto f = fmt::output_file("P1689.json");
         f.print("[\n");
@@ -212,7 +220,7 @@ int main(int argc, char **argv)
         fmt::println("{} -> module '{}'", t.src, t.mname);
 
     // ninja
-    flags = "-std=c++26";
+    flags = "-std=c++26 -Wno-experimental-header-units";
     const auto order = graaf::algorithm::dfs_topological_sort(g);
     if (!order)
         return 1;
@@ -227,7 +235,7 @@ int main(int argc, char **argv)
     nf.print("  description = OBJ $out\n");
 
     nf.print("rule precompile_header_unit\n");
-    nf.print("  command = {} {} -x c++-header -fmodule-header -Wexperimental-header-units $in -o $out\n", cxx, flags);
+    nf.print("  command = {} {} -x c++-header -fmodule-header $in -o $out\n", cxx, flags);
     nf.print("  description = PCM $out\n");
 
     nf.print("rule compile_src\n");

@@ -1,0 +1,70 @@
+import (
+    "std.um"
+)
+
+type target* = struct
+{
+    name: str;
+    src: str;
+    type_: str;
+    deps: []str;
+}
+
+var targets: []target
+
+fn check_deps(deps: []str) {
+    for _, dep in deps {
+        var found: bool = false
+        for _, t in targets {
+            if t.name == dep {
+                found = true
+                break
+            }
+        }
+        if !found {
+            exit(1)
+        }
+    }
+}
+
+fn named_module*(name, src: str, deps: []str) {
+    check_deps(deps)
+    targets = append(targets, target{name: name, src: src, type_: "named_module", deps: deps})
+}
+
+fn header_unit*(name, src: str, deps: []str) {
+    check_deps(deps)
+    targets = append(targets, target{name: name, src: src, type_: "header_unit", deps: deps})
+}
+
+fn translation_unit*(name: str, srcs: []str, deps: []str) {
+    check_deps(deps)
+    for _, src in srcs {
+        targets = append(targets, target{name: name, src: src, type_: "translation_unit", deps: deps})
+    }
+}
+
+fn exe*(name, src: str, deps: []str) {
+    check_deps(deps)
+    targets = append(targets, target{name: name, src: src, type_: "exe", deps: deps})
+}
+
+fn configure*(): []target {
+    named_module("m4", "m4.c++", []str{})
+    named_module("m3", "m3.cppm", []str{"m4"})
+    named_module("m2", "m2.cc", []str{"m4"})
+    named_module("m1", "m1.cpp", []str{"m3", "m2"})
+
+    translation_unit("app0", []str{"app0.cpp"}, []str{"m1"})
+    exe("app0_link", "app0", []str{"app0"})
+
+    header_unit("h1", "h1.hpp", []str{})
+    header_unit("h2", "h2.h", []str{"h1"})
+    header_unit("h3", "h3.hh", []str{"h1"})
+    header_unit("h4", "h4.h++", []str{"h2", "h3"})
+
+    translation_unit("app1_tu", []str{"h1.cpp", "h2.cpp", "h3.cpp", "h4.cpp", "app1.cpp"}, []str{"h4"})
+    exe("app1_link", "app1", []str{"app1_tu"})
+
+    return targets
+}
