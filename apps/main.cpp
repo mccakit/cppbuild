@@ -9,41 +9,41 @@ import std;
 
 struct target
 {
-    std::string name;
-    std::vector<std::filesystem::path> srcs;
-    std::map<std::string, std::string> src_to_mname;
-    std::string type;
-    std::vector<std::string> deps;
+        std::string name;
+        std::vector<std::filesystem::path> srcs;
+        std::map<std::string, std::string> src_to_mname;
+        std::string type;
+        std::vector<std::string> deps;
 };
 
 struct umka_strarr
 {
-    const UmkaType *type;
-    int64_t itemSize;
-    const char **data;
+        const UmkaType *type;
+        int64_t itemSize;
+        const char **data;
 };
 
 struct umka_target
 {
-    const char *name;
-    umka_strarr srcs;
-    const char *type;
-    umka_strarr deps;
+        const char *name;
+        umka_strarr srcs;
+        const char *type;
+        umka_strarr deps;
 };
 
 struct umka_result
 {
-    const UmkaType *type;
-    int64_t itemSize;
-    umka_target *data;
+        const UmkaType *type;
+        int64_t itemSize;
+        umka_target *data;
 };
 
 struct umka_target_cxx
 {
-    std::string name;
-    std::vector<std::string> srcs;
-    std::string type;
-    std::vector<std::string> deps;
+        std::string name;
+        std::vector<std::string> srcs;
+        std::string type;
+        std::vector<std::string> deps;
 };
 
 int main(int argc, char **argv)
@@ -76,7 +76,6 @@ int main(int argc, char **argv)
             return 1;
         }
 
-
         umka_result result_storage{};
         UmkaStackSlot result_slot = {};
         result_slot.ptrVal = &result_storage;
@@ -105,8 +104,8 @@ int main(int argc, char **argv)
         }
 
         for (auto &t : umka_targets)
-            fmt::println("name={} type={} srcs=[{}] deps=[{}]", t.name, t.type,
-                         fmt::join(t.srcs, ", "), fmt::join(t.deps, ", "));
+            fmt::println("name={} type={} srcs=[{}] deps=[{}]", t.name, t.type, fmt::join(t.srcs, ", "),
+                         fmt::join(t.deps, ", "));
 
         for (int i = 0; i < len; i++)
         {
@@ -150,7 +149,8 @@ int main(int argc, char **argv)
                 {
                     if (!first)
                         f.print(",\n");
-                    f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -x c++ -c {}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
+                    f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -x c++ -c "
+                            "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
                             dir, cxx, flags, src.string(), src.string(), src.string());
                     first = false;
                 }
@@ -198,7 +198,8 @@ int main(int argc, char **argv)
 
         // rules
         nf.print("rule scan_deps\n");
-        nf.print("  command = clang-scan-deps -format=p1689 -compilation-database compile_commands.json | ./cppbuild scan $out\n");
+        nf.print("  command = clang-scan-deps -format=p1689 -compilation-database compile_commands.json | ./cppbuild "
+                 "scan $out\n");
         nf.print("  description = SCAN\n\n");
         nf.print("rule precompile\n");
         nf.print("  command = {} {} --precompile -x c++-module $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
