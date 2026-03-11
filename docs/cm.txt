@@ -1,74 +1,109 @@
-C++20 Modules Build Process - module_test
-==========================================
+# C++20 Modules Build Process
 
-1. CREATE compile_commands.json (P1689.json)
----------------------------------------------
-[
-  { "directory": "...", "command": "clang++ -std=c++20 -c m1.cpp", "file": "m1.cpp" },
-  { "directory": "...", "command": "clang++ -std=c++20 -c m2.cc",  "file": "m2.cc"  },
-  { "directory": "...", "command": "clang++ -std=c++20 -c m3.cppm","file": "m3.cppm"},
-  { "directory": "...", "command": "clang++ -std=c++20 -c m4.c++", "file": "m4.c++" }
-]
+## Key Findings
 
-2. SCAN DEPENDENCIES
----------------------
-clang-scan-deps -format=p1689 -compilation-database P1689.json
-Outputs the module dependency graph in P1689 format.
-Use this to determine build order.
-NOTE: clang-scan-deps only handles named modules, NOT header units.
+### Dependency Discovery
+- `clang-scan-deps -format=p1689` scans named modules only — no header units
+- Output is P1689 JSON with `provides` (module name + source path) and `requires` (imports)
+- `primary-output` field is unreliable — use `provides[].source-path` instead
+- Named modules use logical names (`a`, `b`, `d`) found via `-fprebuilt-module-path=.`
+- Header units have no logical name — must use `-fmodule-file=path.pcm` explicitly per consumer
 
-3. PHASE 1 — precompile to .pcm (frontend only), in dependency order
----------------------------------------------------------------------
-# Once a .pcm is ready, its consumer's phase 1 AND its own phase 2 can run in parallel.
+### PCM Naming
+- Named modules: pcm named after logical module name (`d.pcm`, not `m4.c++.pcm`)
+  - Clang resolves them automatically via `-fprebuilt-module-path=.`
+- Header units: pcm named after source file (`h1.hpp.pcm`)
+  - Must be passed explicitly to each consumer via `-fmodule-file=h1.hpp.pcm`
+- Filename-based pcm naming for named modules does NOT work with `-fprebuilt-module-path`
+  - `-fmodule-file=name=path` alternative works but can't be passed through ninja dyndep
 
-Named modules:
-clang++ -std=c++20 --precompile -x c++-module m4.c++  -o d.pcm -fprebuilt-module-path=.
-clang++ -std=c++20 --precompile -x c++-module m3.cppm -o c.pcm -fprebuilt-module-path=.
-clang++ -std=c++20 --precompile -x c++-module m2.cc   -o b.pcm -fprebuilt-module-path=.
-clang++ -std=c++20 --precompile -x c++-module m1.cpp  -o a.pcm -fprebuilt-module-path=.
+### Ninja Dyndep
+- Dyndep files only support `restat` as a variable binding — no custom variables
+- Cannot pass `-fmodule-file` flags through dyndep
+- Dyndep is used for ordering only — not for compiler flags
+- Every `build X: precompile` that declares `dyndep = modules.dd` must have exactly one entry in `modules.dd`
+- `modules.dd` is generated at build time by `clang-scan-deps | scan`
 
-Header units:
-clang++ -std=c++20 -fmodule-header h1.hpp -o h1.pcm
-clang++ -std=c++20 -fmodule-header h2.h   -o h2.pcm
-clang++ -std=c++20 -fmodule-header h3.hh  -o h3.pcm
-clang++ -std=c++20 -x c++-header -fmodule-header h4.h++ -o h4.pcm   # non-standard ext needs -x c++-header
-NOTE: header unit .pcm files CANNOT be compiled to .o — skip phase 2 for them.
-NOTE: header units have no logical name, so -fprebuilt-module-path does NOT work for them.
+### Build Phases
+Three phases allow maximum parallelism:
 
-4. PHASE 2 — compile to .o (codegen), parallelizable with phase 1 consumers
-----------------------------------------------------------------------------
-Named module units (pcm -> o):
-clang++ -std=c++20 -c d.pcm -o d.o -fprebuilt-module-path=.
-clang++ -std=c++20 -c c.pcm -o c.o -fprebuilt-module-path=.
-clang++ -std=c++20 -c b.pcm -o b.o -fprebuilt-module-path=.
-clang++ -std=c++20 -c a.pcm -o a.o -fprebuilt-module-path=.
+**Phase 1 — Precompile to .pcm (frontend only)**
+```
+clang++ -std=c++26 --precompile -x c++-module m4.c++ -o d.pcm -fprebuilt-module-path=.
+clang++ -std=c++26 --precompile -x c++-module m3.cppm -o c.pcm -fprebuilt-module-path=.
+clang++ -std=c++26 --precompile -x c++-module m2.cc -o b.pcm -fprebuilt-module-path=.
+clang++ -std=c++26 --precompile -x c++-module m1.cpp -o a.pcm -fprebuilt-module-path=.
+```
+Header units (deps must be explicit):
+```
+clang++ -std=c++26 -x c++-header -fmodule-header h1.hpp -o h1.hpp.pcm
+clang++ -std=c++26 -x c++-header -fmodule-header h4.h++ -o h4.h++.pcm  # non-std ext needs -x
+```
 
-Non-module source files and header unit impl files (src -> o):
-clang++ -std=c++20 -c main.cpp -o main.o -fprebuilt-module-path=.
-clang++ -std=c++20 -c h1.cpp -o h1.o     # no module flags needed, just a regular compile
-clang++ -std=c++20 -c h2.cpp -o h2.o
-clang++ -std=c++20 -c h3.cpp -o h3.o
-clang++ -std=c++20 -c h4.cpp -o h4.o
+**Phase 2 — Compile to .o (codegen)**
+```
+clang++ -std=c++26 -c d.pcm -o d.o -fprebuilt-module-path=.
+clang++ -std=c++26 -c a.pcm -o a.o -fprebuilt-module-path=.
+clang++ -std=c++26 -c app0.cpp -o app0.o -fprebuilt-module-path=.
+```
+Header unit consumers need explicit flags:
+```
+clang++ -std=c++26 -c consumer.cpp -o consumer.o -fmodule-file=h1.hpp.pcm -fmodule-file=h4.h++.pcm
+```
+Header unit .pcm files have no corresponding .o — only their impl .cpp does.
 
-Consumers of header units must list each .pcm explicitly:
-clang++ -std=c++20 -fmodule-file=h1.pcm -fmodule-file=h2.pcm -c consumer.cpp -o consumer.o
+**Phase 3 — Link**
+```
+clang++ a.o b.o c.o d.o app0.o -o app0.elf
+```
 
-5. LINK
---------
-clang++ d.o b.o c.o a.o h1.o h2.o h3.o h4.o main.o -o main
+### Final build.ninja Structure
+```ninja
+rule scan_deps
+  command = clang-scan-deps -format=p1689 -compilation-database compile_commands.json | ./scan $out
+  description = SCAN
 
-NOTES
-------
-- Two-phase allows overlap: as soon as d.pcm is ready, b.pcm phase 1 and d.o
-  phase 2 can run simultaneously — better parallelism on deep dep graphs
-- -fprebuilt-module-path=. lets clang find named module pcms by module name automatically
-- Header units are "nominally anonymous" — keyed by file path, not a logical name
-  so each consumer must receive -fmodule-file=path/to.pcm explicitly
-- Header unit .pcm files have no corresponding .o — only their impl .cpp does
-- .o files are standard objects; linker has no knowledge of modules
-- Build order for phase 1 must respect the dependency graph from scan-deps
-- Phase 2 (.pcm -> .o) steps are all independent and fully parallelizable
-- For non-standard extensions on named modules, -x c++-module is required
-- For non-standard extensions on header units, -x c++-header is required
-- Known header unit extensions recognized without -x: .h .hh .hpp .hxx .h++
-  (in practice only .h .hh .hpp work without -x; .h++ requires -x c++-header)
+rule precompile
+  command = clang++ -std=c++26 --precompile -x c++-module $in -o $out -fprebuilt-module-path=.
+  description = PCM $out
+
+rule compile_pcm
+  command = clang++ -std=c++26 -c $in -o $out -fprebuilt-module-path=.
+  description = OBJ $out
+
+rule compile_src
+  command = clang++ -std=c++26 -fprebuilt-module-path=. -c $in -o $out
+  description = OBJ $out
+
+rule link
+  command = clang++ $in -o $out
+  description = LINK $out
+
+build modules.dd: scan_deps compile_commands.json
+
+build d.pcm: precompile m4.c++ || modules.dd
+  dyndep = modules.dd
+build c.pcm: precompile m3.cppm || modules.dd
+  dyndep = modules.dd
+build b.pcm: precompile m2.cc || modules.dd
+  dyndep = modules.dd
+build a.pcm: precompile m1.cpp || modules.dd
+  dyndep = modules.dd
+
+build d.o: compile_pcm d.pcm
+build c.o: compile_pcm c.pcm
+build b.o: compile_pcm b.pcm
+build a.o: compile_pcm a.pcm
+
+build app0.o: compile_src app0.cpp | a.pcm
+
+build app0.elf: link app0.o a.o b.o c.o d.o
+```
+
+### Notes
+- As soon as `d.pcm` is ready, `c.pcm`/`b.pcm` phase 1 and `d.o` phase 2 run simultaneously
+- Non-standard extensions on named modules require `-x c++-module`
+- Non-standard extensions on header units require `-x c++-header`
+- Header unit pcms keyed by file path, not logical name — no auto-resolution
+- Linker has no knowledge of modules — just links .o files as normal
+- Reconfigure needed only when module names change or new sources are added

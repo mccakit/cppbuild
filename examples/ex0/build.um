@@ -2,69 +2,76 @@ import (
     "std.um"
 )
 
-type target* = struct
-{
-    name: str;
-    src: str;
+type build_target* = struct {
+    name:  str;
+    srcs:  []str;
     type_: str;
-    deps: []str;
+    deps:  []str;
 }
 
-var targets: []target
+type phony_target* = struct {
+    name:          str;
+    type_:         str;
+    deps:          []str;
+    build_targets: []build_target;
+}
 
-fn check_deps(deps: []str) {
-    for _, dep in deps {
-        var found: bool = false
-        for _, t in targets {
-            if t.name == dep {
-                found = true
-                break
+var build_targets: []build_target
+var phony_targets: []phony_target
+
+fn find_phony(name: str): int {
+    for i, t in phony_targets {
+        if t.name == name { return i }
+    }
+    return -1
+}
+
+fn add_target*(name, type_: str, deps: []str) {
+    phony_targets = append(phony_targets, phony_target{name: name, type_: type_, deps: deps})
+}
+
+fn add_sources_to_target*(name: str, type_: str, srcs: []str) {
+    idx := find_phony(name)
+    if idx != -1 {
+        step_name := name + "_" + type_
+        var filtered_deps: []str
+        for _, dep in phony_targets[idx].deps {
+            if dep != step_name {
+                filtered_deps = append(filtered_deps, dep)
             }
         }
-        if !found {
-            exit(1)
+        build_targets = append(build_targets, build_target{
+            name:  step_name,
+            type_: type_,
+            deps:  filtered_deps,
+            srcs:  srcs
+        })
+        phony_targets[idx].deps = append(phony_targets[idx].deps, step_name)
+    }
+}
+
+fn end_configure*() {
+    for i, target in phony_targets {
+        if target.type_ == "exe" {
+            build_targets = append(build_targets, build_target{
+                name:  target.name,
+                type_: target.type_,
+                deps:  target.deps,
+                srcs:  []str{}
+            })
         }
     }
 }
 
-fn named_module*(name, src: str, deps: []str) {
-    check_deps(deps)
-    targets = append(targets, target{name: name, src: src, type_: "named_module", deps: deps})
-}
+fn configure*(): []build_target {
+    add_target("target0", "exe", []str{})
+    add_sources_to_target("target0", "named_module", []str{"m4.c++", "m3.cppm", "m2.cc", "m1.cpp"})
+    add_sources_to_target("target0", "translation_unit", []str{"app0.cpp"})
 
-fn header_unit*(name, src: str, deps: []str) {
-    check_deps(deps)
-    targets = append(targets, target{name: name, src: src, type_: "header_unit", deps: deps})
-}
+    add_target("target1", "exe", []str{})
+    add_sources_to_target("target1", "header_unit", []str{"h1.hpp", "h2.h", "h3.hh", "h4.h++"})
+    add_sources_to_target("target1", "translation_unit", []str{"h1.cpp", "h2.cpp", "h3.cpp", "h4.cpp", "app1.cpp"})
 
-fn translation_unit*(name: str, srcs: []str, deps: []str) {
-    check_deps(deps)
-    for _, src in srcs {
-        targets = append(targets, target{name: name, src: src, type_: "translation_unit", deps: deps})
-    }
-}
-
-fn exe*(name, src: str, deps: []str) {
-    check_deps(deps)
-    targets = append(targets, target{name: name, src: src, type_: "exe", deps: deps})
-}
-
-fn configure*(): []target {
-    named_module("m4", "m4.c++", []str{})
-    named_module("m3", "m3.cppm", []str{"m4"})
-    named_module("m2", "m2.cc", []str{"m4"})
-    named_module("m1", "m1.cpp", []str{"m3", "m2"})
-
-    translation_unit("app0", []str{"app0.cpp"}, []str{"m1"})
-    exe("app0_link", "app0", []str{"app0"})
-
-    header_unit("h1", "h1.hpp", []str{})
-    header_unit("h2", "h2.h", []str{"h1"})
-    header_unit("h3", "h3.hh", []str{"h1"})
-    header_unit("h4", "h4.h++", []str{"h2", "h3"})
-
-    translation_unit("app1_tu", []str{"h1.cpp", "h2.cpp", "h3.cpp", "h4.cpp", "app1.cpp"}, []str{"h4"})
-    exe("app1_link", "app1", []str{"app1_tu"})
-
-    return targets
+    end_configure()
+    return build_targets
 }
