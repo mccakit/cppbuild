@@ -17,6 +17,238 @@ struct target
         std::vector<std::string> deps;
 };
 
+using graph_t = graaf::directed_graph<target, int>;
+
+void write_compile_commands(const graph_t &g, const std::string &dir, const std::string &cxx, const std::string &flags)
+{
+    auto f = fmt::output_file("compile_commands.json");
+    f.print("[\n");
+    bool first = true;
+    for (const auto &[id, t] : g.get_vertices())
+    {
+        if (t.type != "named_module")
+            continue;
+        for (const auto &src : t.srcs)
+        {
+            if (!first)
+                f.print(",\n");
+            f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -x c++ -c "
+                    "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
+                    dir, cxx, flags, src.string(), src.string(), src.string());
+            first = false;
+        }
+    }
+    f.print("\n]\n");
+}
+
+void fill_module_names(graph_t &g, const std::string &scan_output)
+{
+    simdjson::dom::parser parser;
+    auto doc = parser.parse(scan_output);
+    for (auto rule : doc["rules"])
+    {
+        simdjson::dom::array provides;
+        if (rule["provides"].get(provides) != simdjson::SUCCESS)
+            continue;
+        for (auto p : provides)
+        {
+            std::string src = std::string(p["source-path"].get_string().value());
+            std::string name = std::string(p["logical-name"].get_string().value());
+            for (auto &[id, t] : g.get_vertices())
+                for (const auto &tsrc : t.srcs)
+                    if (tsrc.string() == src)
+                        g.get_vertex(id).src_to_mname[src] = name;
+        }
+    }
+}
+
+void write_ninja_rules(fmt::ostream &nf, const std::string &cxx, const std::string &flags)
+{
+    nf.print("rule scan_deps\n");
+    nf.print("  command = clang-scan-deps -format=p1689 -compilation-database compile_commands.json | ./cppbuild "
+             "scan $out\n");
+    nf.print("  description = SCAN\n\n");
+    nf.print("rule precompile\n");
+    nf.print("  command = {} {} --precompile -x c++-module $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
+    nf.print("  description = PCM $out\n\n");
+    nf.print("rule compile_pcm\n");
+    nf.print("  command = {} {} -c $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
+    nf.print("  description = OBJ $out\n\n");
+    nf.print("rule precompile_header_unit\n");
+    nf.print("  command = {} {} -x c++-header -fmodule-header $in -o $out\n", cxx, flags);
+    nf.print("  description = PCM $out\n\n");
+    nf.print("rule compile_src\n");
+    nf.print("  command = {} {} -c $in -o $out -fprebuilt-module-path=. $header_unit_deps\n", cxx, flags);
+    nf.print("  description = OBJ $out\n\n");
+    nf.print("rule link\n");
+    nf.print("  command = {} $in -o $out\n", cxx);
+    nf.print("  description = LINK $out\n\n");
+    nf.print("build modules.dd: scan_deps compile_commands.json\n\n");
+}
+
+void write_phase_precompile(fmt::ostream &nf, const graph_t &g, const std::vector<graaf::vertex_id_t> &order)
+{
+    for (auto id : order)
+    {
+        const auto &t = g.get_vertex(id);
+        const auto &deps = g.get_neighbors(id);
+        if (t.type == "named_module")
+        {
+            for (const auto &src : t.srcs)
+            {
+                const auto &mname = t.src_to_mname.at(src.string());
+                nf.print("build {}.pcm: precompile {} || modules.dd\n", mname, src.string());
+                nf.print("  dyndep = modules.dd\n");
+            }
+        }
+        else if (t.type == "header_unit")
+        {
+            for (const auto &src : t.srcs)
+            {
+                std::string dep_pcms;
+                for (auto dep_id : deps)
+                    for (const auto &dep_src : g.get_vertex(dep_id).srcs)
+                        dep_pcms += fmt::format(" {}.pcm", dep_src.string());
+                nf.print("build {}.pcm: precompile_header_unit {}{}\n", src.string(), src.string(),
+                         dep_pcms.empty() ? "" : " |" + dep_pcms);
+            }
+        }
+    }
+    nf.print("\n");
+}
+
+void write_phase_codegen(fmt::ostream &nf, const graph_t &g, const std::vector<graaf::vertex_id_t> &order)
+{
+    for (auto id : order)
+    {
+        const auto &t = g.get_vertex(id);
+        const auto &deps = g.get_neighbors(id);
+        if (t.type == "named_module")
+        {
+            for (const auto &src : t.srcs)
+            {
+                const auto &mname = t.src_to_mname.at(src.string());
+                nf.print("build {}.o: compile_pcm {}.pcm\n", mname, mname);
+            }
+        }
+        else if (t.type == "translation_unit")
+        {
+            for (const auto &src : t.srcs)
+            {
+                std::string dep_pcms;
+                std::string header_unit_flags;
+                std::set<graaf::vertex_id_t> visited;
+                std::stack<graaf::vertex_id_t> stk;
+                for (auto dep_id : deps)
+                    stk.push(dep_id);
+                while (!stk.empty())
+                {
+                    auto cur = stk.top();
+                    stk.pop();
+                    if (visited.contains(cur))
+                        continue;
+                    visited.insert(cur);
+                    const auto &dep = g.get_vertex(cur);
+                    if (dep.type == "header_unit")
+                    {
+                        for (const auto &dep_src : dep.srcs)
+                        {
+                            dep_pcms += fmt::format(" {}.pcm", dep_src.string());
+                            header_unit_flags += fmt::format(" -fmodule-file={}.pcm", dep_src.string());
+                        }
+                        for (auto dep_id : g.get_neighbors(cur))
+                            stk.push(dep_id);
+                    }
+                    else if (dep.type == "named_module")
+                        for (const auto &[s, mname] : dep.src_to_mname)
+                            dep_pcms += fmt::format(" {}.pcm", mname);
+                }
+                nf.print("build {}.o: compile_src {}{}\n", src.stem().string(), src.string(),
+                         dep_pcms.empty() ? "" : " |" + dep_pcms);
+                if (!header_unit_flags.empty())
+                    nf.print("  header_unit_deps ={}\n", header_unit_flags);
+            }
+        }
+    }
+    nf.print("\n");
+}
+
+void write_phase_link(fmt::ostream &nf, const graph_t &g, const std::vector<graaf::vertex_id_t> &order)
+{
+    for (auto id : order)
+    {
+        const auto &t = g.get_vertex(id);
+        if (t.type != "exe")
+            continue;
+        std::string objs;
+        std::set<graaf::vertex_id_t> visited;
+        std::stack<graaf::vertex_id_t> stack;
+        stack.push(id);
+        while (!stack.empty())
+        {
+            auto cur = stack.top();
+            stack.pop();
+            if (visited.contains(cur))
+                continue;
+            visited.insert(cur);
+            const auto &vt = g.get_vertex(cur);
+            if (vt.type == "translation_unit")
+                for (const auto &src : vt.srcs)
+                    objs += fmt::format(" {}.o", src.stem().string());
+            else if (vt.type == "named_module")
+                for (const auto &[s, mname] : vt.src_to_mname)
+                    objs += fmt::format(" {}.o", mname);
+            for (auto dep_id : g.get_neighbors(cur))
+                stack.push(dep_id);
+        }
+        nf.print("build {}.elf: link {}\n", t.name, objs);
+    }
+}
+
+void cmd_scan(int argc, char **argv)
+{
+    std::string input;
+    for (std::string line; std::getline(std::cin, line);)
+        input += line + "\n";
+
+    simdjson::dom::parser parser;
+    auto doc = parser.parse(input);
+
+    std::unordered_map<std::string, std::string> name_to_pcm;
+    for (auto rule : doc["rules"])
+    {
+        simdjson::dom::array provides;
+        if (rule["provides"].get(provides) != simdjson::SUCCESS)
+            continue;
+        for (auto p : provides)
+        {
+            std::string name = std::string(p["logical-name"].get_string().value());
+            name_to_pcm[name] = name + ".pcm";
+        }
+    }
+
+    std::ofstream out(argv[2]);
+    out << "ninja_dyndep_version = 1\n";
+
+    for (auto rule : doc["rules"])
+    {
+        simdjson::dom::array provides;
+        if (rule["provides"].get(provides) != simdjson::SUCCESS)
+            continue;
+        std::string pcm = std::string(provides.at(0)["logical-name"].get_string().value()) + ".pcm";
+        std::string deps;
+        simdjson::dom::array requires_;
+        if (rule["requires"].get(requires_) == simdjson::SUCCESS)
+            for (auto r : requires_)
+            {
+                auto it = name_to_pcm.find(std::string(r["logical-name"].get_string().value()));
+                if (it != name_to_pcm.end())
+                    deps += " " + it->second;
+            }
+        out << "build " << pcm << ": dyndep" << (deps.empty() ? "" : " |" + deps) << "\n";
+    }
+}
+
 int main(int argc, char **argv)
 {
     const std::string_view cmd = argv[1];
@@ -24,7 +256,11 @@ int main(int argc, char **argv)
     {
         umka_conf::umka_conf conf(argv[2], "configure");
         auto targets = conf.run();
-        graaf::directed_graph<target, int> g;
+        for (auto &t : targets)
+            fmt::println("name={} type={} srcs=[{}] deps=[{}]", t.name, t.type,
+                         fmt::join(t.srcs, ", "), fmt::join(t.deps, ", "));
+
+        graph_t g;
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
         for (auto &ut : targets)
         {
@@ -45,29 +281,8 @@ int main(int argc, char **argv)
         const std::string cxx = "clang++";
         const std::string flags = "-std=c++26 -Wno-experimental-header-units";
 
-        // compile_commands.json (named modules only, for clang-scan-deps)
-        {
-            auto f = fmt::output_file("compile_commands.json");
-            f.print("[\n");
-            bool first = true;
-            for (const auto &[id, t] : g.get_vertices())
-            {
-                if (t.type != "named_module")
-                    continue;
-                for (const auto &src : t.srcs)
-                {
-                    if (!first)
-                        f.print(",\n");
-                    f.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -x c++ -c "
-                            "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
-                            dir, cxx, flags, src.string(), src.string(), src.string());
-                    first = false;
-                }
-            }
-            f.print("\n]\n");
-        }
+        write_compile_commands(g, dir, cxx, flags);
 
-        // configure-time scan to get logical module names
         std::string scan_output;
         {
             FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database compile_commands.json", "r");
@@ -79,211 +294,21 @@ int main(int argc, char **argv)
             pclose(pipe);
         }
 
-        // parse p1689 and fill src_to_mname
-        simdjson::dom::parser parser;
-        auto doc = parser.parse(scan_output);
-        for (auto rule : doc["rules"])
-        {
-            simdjson::dom::array provides;
-            if (rule["provides"].get(provides) != simdjson::SUCCESS)
-                continue;
-            for (auto p : provides)
-            {
-                std::string src = std::string(p["source-path"].get_string().value());
-                std::string name = std::string(p["logical-name"].get_string().value());
-                for (auto &[id, t] : g.get_vertices())
-                    for (const auto &tsrc : t.srcs)
-                        if (tsrc.string() == src)
-                            g.get_vertex(id).src_to_mname[src] = name;
-            }
-        }
+        fill_module_names(g, scan_output);
 
-        // topological sort
         const auto order = graaf::algorithm::dfs_topological_sort(g);
         if (!order)
             return 1;
 
         auto nf = fmt::output_file("build.ninja");
-
-        // rules
-        nf.print("rule scan_deps\n");
-        nf.print("  command = clang-scan-deps -format=p1689 -compilation-database compile_commands.json | ./cppbuild "
-                 "scan $out\n");
-        nf.print("  description = SCAN\n\n");
-        nf.print("rule precompile\n");
-        nf.print("  command = {} {} --precompile -x c++-module $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
-        nf.print("  description = PCM $out\n\n");
-        nf.print("rule compile_pcm\n");
-        nf.print("  command = {} {} -c $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
-        nf.print("  description = OBJ $out\n\n");
-        nf.print("rule precompile_header_unit\n");
-        nf.print("  command = {} {} -x c++-header -fmodule-header $in -o $out\n", cxx, flags);
-        nf.print("  description = PCM $out\n\n");
-        nf.print("rule compile_src\n");
-        nf.print("  command = {} {} -c $in -o $out -fprebuilt-module-path=. $header_unit_deps\n", cxx, flags);
-        nf.print("  description = OBJ $out\n\n");
-        nf.print("rule link\n");
-        nf.print("  command = {} $in -o $out\n", cxx);
-        nf.print("  description = LINK $out\n\n");
-
-        // modules.dd
-        nf.print("build modules.dd: scan_deps compile_commands.json\n\n");
-
-        // phase 1 - precompile
-        for (auto id : *order)
-        {
-            const auto &t = g.get_vertex(id);
-            const auto &deps = g.get_neighbors(id);
-            if (t.type == "named_module")
-            {
-                for (const auto &src : t.srcs)
-                {
-                    const auto &mname = t.src_to_mname.at(src.string());
-                    nf.print("build {}.pcm: precompile {} || modules.dd\n", mname, src.string());
-                    nf.print("  dyndep = modules.dd\n");
-                }
-            }
-            else if (t.type == "header_unit")
-            {
-                for (const auto &src : t.srcs)
-                {
-                    std::string dep_pcms;
-                    for (auto dep_id : deps)
-                        for (const auto &dep_src : g.get_vertex(dep_id).srcs)
-                            dep_pcms += fmt::format(" {}.pcm", dep_src.string());
-                    nf.print("build {}.pcm: precompile_header_unit {}{}\n", src.string(), src.string(),
-                             dep_pcms.empty() ? "" : " |" + dep_pcms);
-                }
-            }
-        }
-        nf.print("\n");
-
-        // phase 2 - codegen
-        for (auto id : *order)
-        {
-            const auto &t = g.get_vertex(id);
-            const auto &deps = g.get_neighbors(id);
-            if (t.type == "named_module")
-            {
-                for (const auto &src : t.srcs)
-                {
-                    const auto &mname = t.src_to_mname.at(src.string());
-                    nf.print("build {}.o: compile_pcm {}.pcm\n", mname, mname);
-                }
-            }
-            else if (t.type == "translation_unit")
-            {
-                for (const auto &src : t.srcs)
-                {
-                    std::string dep_pcms;
-                    std::string header_unit_flags;
-                    std::set<graaf::vertex_id_t> visited;
-                    std::stack<graaf::vertex_id_t> stk;
-                    for (auto dep_id : deps)
-                        stk.push(dep_id);
-                    while (!stk.empty())
-                    {
-                        auto cur = stk.top();
-                        stk.pop();
-                        if (visited.contains(cur))
-                            continue;
-                        visited.insert(cur);
-                        const auto &dep = g.get_vertex(cur);
-                        if (dep.type == "header_unit")
-                        {
-                            for (const auto &dep_src : dep.srcs)
-                            {
-                                dep_pcms += fmt::format(" {}.pcm", dep_src.string());
-                                header_unit_flags += fmt::format(" -fmodule-file={}.pcm", dep_src.string());
-                            }
-                            for (auto dep_id : g.get_neighbors(cur))
-                                stk.push(dep_id);
-                        }
-                        else if (dep.type == "named_module")
-                            for (const auto &[s, mname] : dep.src_to_mname)
-                                dep_pcms += fmt::format(" {}.pcm", mname);
-                    }
-                    nf.print("build {}.o: compile_src {}{}\n", src.stem().string(), src.string(),
-                             dep_pcms.empty() ? "" : " |" + dep_pcms);
-                    if (!header_unit_flags.empty())
-                        nf.print("  header_unit_deps ={}\n", header_unit_flags);
-                }
-            }
-        }
-        nf.print("\n");
-
-        // phase 3 - link
-        for (auto id : *order)
-        {
-            const auto &t = g.get_vertex(id);
-            if (t.type != "exe")
-                continue;
-            std::string objs;
-            std::set<graaf::vertex_id_t> visited;
-            std::stack<graaf::vertex_id_t> stack;
-            stack.push(id);
-            while (!stack.empty())
-            {
-                auto cur = stack.top();
-                stack.pop();
-                if (visited.contains(cur))
-                    continue;
-                visited.insert(cur);
-                const auto &vt = g.get_vertex(cur);
-                if (vt.type == "translation_unit")
-                    for (const auto &src : vt.srcs)
-                        objs += fmt::format(" {}.o", src.stem().string());
-                else if (vt.type == "named_module")
-                    for (const auto &[s, mname] : vt.src_to_mname)
-                        objs += fmt::format(" {}.o", mname);
-                for (auto dep_id : g.get_neighbors(cur))
-                    stack.push(dep_id);
-            }
-            nf.print("build {}.elf: link {}\n", t.name, objs);
-        }
+        write_ninja_rules(nf, cxx, flags);
+        write_phase_precompile(nf, g, *order);
+        write_phase_codegen(nf, g, *order);
+        write_phase_link(nf, g, *order);
     }
     else if (cmd == "scan")
     {
-        std::string input;
-        for (std::string line; std::getline(std::cin, line);)
-            input += line + "\n";
-
-        simdjson::dom::parser parser;
-        auto doc = parser.parse(input);
-
-        std::unordered_map<std::string, std::string> name_to_pcm;
-        for (auto rule : doc["rules"])
-        {
-            simdjson::dom::array provides;
-            if (rule["provides"].get(provides) != simdjson::SUCCESS)
-                continue;
-            for (auto p : provides)
-            {
-                std::string name = std::string(p["logical-name"].get_string().value());
-                name_to_pcm[name] = name + ".pcm";
-            }
-        }
-
-        std::ofstream out(argv[2]);
-        out << "ninja_dyndep_version = 1\n";
-
-        for (auto rule : doc["rules"])
-        {
-            simdjson::dom::array provides;
-            if (rule["provides"].get(provides) != simdjson::SUCCESS)
-                continue;
-            std::string pcm = std::string(provides.at(0)["logical-name"].get_string().value()) + ".pcm";
-            std::string deps;
-            simdjson::dom::array requires_;
-            if (rule["requires"].get(requires_) == simdjson::SUCCESS)
-                for (auto r : requires_)
-                {
-                    auto it = name_to_pcm.find(std::string(r["logical-name"].get_string().value()));
-                    if (it != name_to_pcm.end())
-                        deps += " " + it->second;
-                }
-            out << "build " << pcm << ": dyndep" << (deps.empty() ? "" : " |" + deps) << "\n";
-        }
+        cmd_scan(argc, argv);
     }
     return 0;
 }
