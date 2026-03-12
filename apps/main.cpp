@@ -6,6 +6,7 @@
 #include <umka_api.h>
 
 import std;
+import umka_conf;
 
 struct target
 {
@@ -16,108 +17,16 @@ struct target
         std::vector<std::string> deps;
 };
 
-struct umka_strarr
-{
-        const UmkaType *type;
-        int64_t itemSize;
-        const char **data;
-};
-
-struct umka_target
-{
-        const char *name;
-        umka_strarr srcs;
-        const char *type;
-        umka_strarr deps;
-};
-
-struct umka_result
-{
-        const UmkaType *type;
-        int64_t itemSize;
-        umka_target *data;
-};
-
-struct umka_target_cxx
-{
-        std::string name;
-        std::vector<std::string> srcs;
-        std::string type;
-        std::vector<std::string> deps;
-};
-
 int main(int argc, char **argv)
 {
     const std::string_view cmd = argv[1];
     if (cmd == "configure")
     {
-        const std::string script = argv[2];
-        Umka *umka = umkaAlloc();
-        if (!umkaInit(umka, script.c_str(), nullptr, 65536, nullptr, 0, nullptr, true, true, nullptr))
-        {
-            fmt::println("umkaInit failed: {}", umkaGetError(umka)->msg);
-            return 1;
-        }
-        if (!umkaCompile(umka))
-        {
-            fmt::println("umkaCompile failed: {}", umkaGetError(umka)->msg);
-            return 1;
-        }
-        if (umkaRun(umka) != 0)
-        {
-            fmt::println("umkaRun failed: {}", umkaGetError(umka)->msg);
-            return 1;
-        }
-
-        UmkaFuncContext umka_fn = {0};
-        if (!umkaGetFunc(umka, nullptr, "configure", &umka_fn))
-        {
-            fmt::println("umkaGetFunc failed");
-            return 1;
-        }
-
-        umka_result result_storage{};
-        UmkaStackSlot result_slot = {};
-        result_slot.ptrVal = &result_storage;
-        umka_fn.result = &result_slot;
-        if (umkaCall(umka, &umka_fn) != 0)
-        {
-            fmt::println("umkaCall failed: {}", umkaGetError(umka)->msg);
-            return 1;
-        }
-
-        auto *header = (umka_result *)result_slot.ptrVal;
-        int len = umkaGetDynArrayLen(header);
-
-        std::vector<umka_target_cxx> umka_targets;
-        for (int i = 0; i < len; i++)
-        {
-            auto &t = header->data[i];
-            int src_len = umkaGetDynArrayLen(&t.srcs);
-            int dep_len = umkaGetDynArrayLen(&t.deps);
-            std::vector<std::string> srcs, deps;
-            for (int j = 0; j < src_len; j++)
-                srcs.push_back(t.srcs.data[j]);
-            for (int j = 0; j < dep_len; j++)
-                deps.push_back(t.deps.data[j]);
-            umka_targets.push_back({t.name, std::move(srcs), t.type, std::move(deps)});
-        }
-
-        for (auto &t : umka_targets)
-            fmt::println("name={} type={} srcs=[{}] deps=[{}]", t.name, t.type, fmt::join(t.srcs, ", "),
-                         fmt::join(t.deps, ", "));
-
-        for (int i = 0; i < len; i++)
-        {
-            umkaDecRef(umka, header->data[i].srcs.data);
-            umkaDecRef(umka, header->data[i].deps.data);
-        }
-        umkaDecRef(umka, result_storage.data);
-        umkaFree(umka);
-
+        umka_conf::umka_conf conf(argv[2], "configure");
+        auto targets = conf.run();
         graaf::directed_graph<target, int> g;
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
-        for (auto &ut : umka_targets)
+        for (auto &ut : targets)
         {
             target t;
             t.name = ut.name;
@@ -127,7 +36,7 @@ int main(int argc, char **argv)
                 t.srcs.push_back(src);
             name_to_id[ut.name] = g.add_vertex(std::move(t));
         }
-        for (auto &ut : umka_targets)
+        for (auto &ut : targets)
             for (auto &dep : ut.deps)
                 if (name_to_id.contains(dep))
                     g.add_edge(name_to_id[ut.name], name_to_id[dep], 1);
