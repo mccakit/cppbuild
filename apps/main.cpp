@@ -8,7 +8,13 @@
 
 import std;
 import umka_cxx;
-
+constexpr std::string_view cxx_compiler = "clang++";
+constexpr std::string_view c_compiler = "clang";
+constexpr std::string_view archiver = "llvm-ar";
+constexpr std::string_view cxxflags = "-std=c++26 -Wno-experimental-header-units";
+constexpr std::string_view cflags = "-std=c23";
+constexpr std::string_view exe_ldflags = "";
+constexpr std::string_view shared_ldflags = "";
 struct target
 {
     public:
@@ -88,14 +94,13 @@ auto write_compile_commands(const write_compile_commands_options &opts) -> void
             }
             const bool is_c = src.extension() == ".c";
             const auto &compiler = is_c ? opts.c_compiler : opts.cxx_compiler;
-            const auto &global_flags = is_c ? opts.cflags : opts.cxxflags;
+            const auto &flags = is_c ? opts.cflags : opts.cxxflags;
             const std::string target_flags = fmt::format("{}", fmt::join(is_c ? t.cflags : t.cxxflags, " "));
-            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} {} -c "
+            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -c "
                        "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
                        "build",
                        compiler,
-                       global_flags,
-                       target_flags,
+                       flags,
                        src.string(),
                        src.string(),
                        src.string());
@@ -135,28 +140,36 @@ auto fill_module_names(graaf::directed_graph<target, int> &graph, std::string_vi
     }
 }
 
-auto write_ninja_rules(fmt::ostream &file, const std::string_view cxx, const std::string_view flags) -> void
+auto write_ninja_rules(fmt::ostream &file, const std::string_view cxx_compiler, const std::string_view c_compiler)
+    -> void
 {
     file.print("rule scan_deps\n");
     file.print("  command = clang-scan-deps -format=p1689 -compilation-database module_commands.json | ./cppbuild "
                "--scan $out\n");
     file.print("  description = SCAN\n\n");
     file.print("rule precompile\n");
-    file.print("  command = {} {} --precompile -x c++-module $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
+    file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out -fprebuilt-module-path=. $cxxflags\n",
+               cxx_compiler);
     file.print("  description = PCM $out\n\n");
     file.print("rule compile_pcm\n");
-    file.print("  command = {} {} -c $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
+    file.print("  command = {} -c $in -o $out -fprebuilt-module-path=. $cxxflags\n", cxx_compiler);
     file.print("  description = OBJ $out\n\n");
     file.print("rule precompile_header_unit\n");
-    file.print("  command = {} {} -x c++-header -fmodule-header $in -o $out\n", cxx, flags);
+    file.print("  command = {} -x c++-header -Wno-experimental-header-units -fmodule-header $in -o $out $cxxflags\n", cxx_compiler);
     file.print("  description = PCM $out\n\n");
-    file.print("rule compile_src\n");
-    file.print("  command = {} {} -c $in -o $out -fprebuilt-module-path=. $header_unit_deps\n", cxx, flags);
+    file.print("rule compile_cxx_translation_unit\n");
+    file.print("  command = {} -c $in -o $out -Wno-experimental-header-units -fprebuilt-module-path=. $cxxflags $header_unit_deps\n", cxx_compiler);
+    file.print("  description = OBJ $out\n\n");
+    file.print("rule compile_c_translation_unit\n");
+    file.print("  command = {} -c $in -o $out $cflags\n", c_compiler);
     file.print("  description = OBJ $out\n\n");
     file.print("rule link\n");
-    file.print("  command = {} $in -o $out\n", cxx);
+    file.print("  command = {} $in -o $out $ldflags\n", cxx_compiler);
     file.print("  description = LINK $out\n\n");
     file.print("build modules.dd: scan_deps module_commands.json\n\n");
+    file.print("rule archive\n");
+    file.print("  command = {} rcs $out $in\n", archiver);
+    file.print("  description = AR $out\n\n");
 }
 
 auto write_phase_precompile(fmt::ostream &file,
@@ -166,7 +179,6 @@ auto write_phase_precompile(fmt::ostream &file,
     for (auto id : order)
     {
         const auto &target = graph.get_vertex(id);
-        const auto &deps = graph.get_neighbors(id);
         if (target.type == "named_module")
         {
             for (const auto &src : target.srcs)
@@ -174,12 +186,22 @@ auto write_phase_precompile(fmt::ostream &file,
                 const auto &mname = target.src_to_mname.at(src.string());
                 file.print("build {}.pcm: precompile {} || modules.dd\n", mname, src.string());
                 file.print("  dyndep = modules.dd\n");
+                if (!target.cxxflags.empty())
+                {
+                    file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                }
             }
         }
         else if (target.type == "header_unit")
         {
             for (const auto &src : target.srcs)
+            {
                 file.print("build {}.pcm: precompile_header_unit {}\n", src.string(), src.string());
+                if (!target.cxxflags.empty())
+                {
+                    file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                }
+            }
         }
     }
     file.print("\n");
@@ -218,19 +240,23 @@ auto write_phase_codegen(fmt::ostream &file,
     {
         const auto &target = graph.get_vertex(id);
         const auto deps = collect_deps(graph, id);
-
         if (target.type == "named_module")
         {
             for (const auto &src : target.srcs)
             {
                 const auto &mname = target.src_to_mname.at(src.string());
                 file.print("build {}.o: compile_pcm {}.pcm\n", mname, mname);
+                if (!target.cxxflags.empty())
+                {
+                    file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                }
             }
         }
         else if (target.type == "translation_unit")
         {
             for (const auto &src : target.srcs)
             {
+                const bool is_c = src.extension() == ".c";
                 std::string dep_pcms;
                 std::string header_unit_flags;
                 for (auto dep_id : deps)
@@ -244,7 +270,6 @@ auto write_phase_codegen(fmt::ostream &file,
                             header_unit_flags += fmt::format(" -fmodule-file={}.pcm", dep_src.string());
                         }
                     }
-
                     else if (dep.type == "named_module")
                     {
                         for (const auto &[s, mname] : dep.src_to_mname)
@@ -254,10 +279,29 @@ auto write_phase_codegen(fmt::ostream &file,
                     }
                 }
                 const auto order_only = dep_pcms.empty() ? "" : " |" + dep_pcms;
-                file.print("build {}.o: compile_src {}{}\n", src.stem().string(), src.string(), order_only);
-                if (!header_unit_flags.empty())
+                if (is_c)
                 {
-                    file.print("  header_unit_deps ={}\n", header_unit_flags);
+                    file.print(
+                        "build {}.o: compile_c_translation_unit {}{}\n", src.stem().string(), src.string(), order_only);
+                    if (!target.cflags.empty())
+                    {
+                        file.print("  cflags = {}\n", fmt::join(target.cflags, " "));
+                    }
+                }
+                else
+                {
+                    file.print("build {}.o: compile_cxx_translation_unit {}{}\n",
+                               src.stem().string(),
+                               src.string(),
+                               order_only);
+                    if (!target.cxxflags.empty())
+                    {
+                        file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                    }
+                    if (!header_unit_flags.empty())
+                    {
+                        file.print("  header_unit_deps ={}\n", header_unit_flags);
+                    }
                 }
             }
         }
@@ -287,6 +331,21 @@ auto write_phase_link(fmt::ostream &file,
         if (target.type == "exe")
         {
             file.print("build {}.elf: link{}\n", target.name, objs);
+            if (!target.ldflags.empty())
+            {
+                file.print("  ldflags = {}\n", fmt::join(target.ldflags, " "));
+            }
+        }
+        else if (target.type == "shared")
+        {
+            file.print("build lib{}.so: link{}\n", target.name, objs);
+            std::vector<std::string> ldflags = target.ldflags;
+            ldflags.insert(ldflags.begin(), "-shared");
+            file.print("  ldflags = {}\n", fmt::join(ldflags, " "));
+        }
+        else if (target.type == "static")
+        {
+            file.print("build lib{}.a: archive{}\n", target.name, objs);
         }
     }
 }
@@ -296,13 +355,14 @@ struct write_ninja_options
     public:
         const graaf::directed_graph<target, int> &graph;
         const std::vector<graaf::vertex_id_t> &order;
-        std::string_view cxx;
-        std::string_view flags;
+        std::string_view cxx_compiler;
+        std::string_view c_compiler;
 };
+
 auto write_ninja(write_ninja_options opts) -> void
 {
     fmt::ostream file{fmt::output_file("build.ninja")};
-    write_ninja_rules(file, opts.cxx, opts.flags);
+    write_ninja_rules(file, opts.cxx_compiler, opts.c_compiler);
     write_phase_precompile(file, opts.graph, opts.order);
     write_phase_codegen(file, opts.graph, opts.order);
     write_phase_link(file, opts.graph, opts.order);
@@ -380,6 +440,9 @@ auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets) -> graph_resul
         target.name = ut.name;
         target.type = ut.type;
         target.deps = ut.deps;
+        target.cxxflags = ut.cxxflags;
+        target.cflags = ut.cflags;
+        target.ldflags = ut.ldflags;
         for (auto &src : ut.srcs)
         {
             target.srcs.push_back(src);
@@ -489,7 +552,7 @@ auto reconfigure() -> int
         fmt::println("Reconfigure failed");
         return 1;
     }
-    write_ninja({.graph = graph, .order = *order, .cxx = cxx, .flags = flags});
+    write_ninja({.graph = graph, .order = *order, .cxx_compiler = cxx_compiler, .c_compiler = c_compiler});;
     std::filesystem::remove("./modules.dd");
     return 0;
 }
@@ -504,8 +567,6 @@ auto main(int argc, char **argv) -> int
         graph_result res{build_graph(targets)};
         graaf::directed_graph<target, int> graph{std::move(res.g)};
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id{std::move(res.name_to_id)};
-        const std::string cxx_compiler = "clang++";
-        const std::string cxxflags = "-std=c++26 -Wno-experimental-header-units";
         write_named_module_compile_commands({.graph = graph, .cxx_compiler = cxx_compiler, .cxxflags = cxxflags});
         std::string scan_output;
         {
@@ -525,9 +586,10 @@ auto main(int argc, char **argv) -> int
         {
             return 1;
         }
-        write_ninja({.graph = graph, .order = *order, .cxx = cxx_compiler, .flags = cxxflags});
+        write_ninja({.graph = graph, .order = *order, .cxx_compiler = cxx_compiler, .c_compiler = c_compiler});
         save_graph("depgraph.json", graph);
-        write_compile_commands({.graph = graph, .cxx_compiler = cxx_compiler, .c_compiler = "", .cxxflags = cxxflags, .cflags = ""});
+        write_compile_commands(
+            {.graph = graph, .cxx_compiler = cxx_compiler, .c_compiler = "", .cxxflags = cxxflags, .cflags = cflags});
     }
     else if (cmd == "--scan")
     {
