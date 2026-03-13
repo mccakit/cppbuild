@@ -1,77 +1,30 @@
 import (
     "std.um"
+    "cppbuild.um"
 )
 
-type build_target* = struct {
-    name:  str;
-    srcs:  []str;
-    type_: str;
-    deps:  []str;
-}
+fn configure*(): []cppbuild::build_target {
+    cppbuild::target("target0", "exe", []str{})
+        cppbuild::add_sources("named_module", []str{"m4.c++", "m3.cppm", "m2.cc", "m1.cpp"})
+        cppbuild::add_sources("translation_unit", []str{"app0.cpp"})
+    cppbuild::end()
 
-type phony_target* = struct {
-    name:          str;
-    type_:         str;
-    deps:          []str;
-    build_targets: []build_target;
-}
+    cppbuild::target("target1", "exe", []str{})
+        cppbuild::add_sources("header_unit", []str{"h1.hpp", "h2.h", "h3.hh", "h4.h++"})
+        cppbuild::add_sources("translation_unit", []str{"h1.cpp", "h2.cpp", "h3.cpp", "h4.cpp", "app1.cpp"})
+    cppbuild::end()
 
-var build_targets: []build_target
-var phony_targets: []phony_target
+    cppbuild::target("target2", "exe", []str{})
+        cppbuild::add_sources("translation_unit", []str{"tu0.c", "tu1.cpp"})
+    cppbuild::end()
 
-fn find_phony(name: str): int {
-    for i, t in phony_targets {
-        if t.name == name { return i }
-    }
-    return -1
-}
+    cppbuild::target("myshared", "shared", []str{})
+        cppbuild::add_sources("translation_unit", []str{"lib0.cpp"})
+    cppbuild::end()
 
-fn add_target*(name, type_: str, deps: []str) {
-    phony_targets = append(phony_targets, phony_target{name: name, type_: type_, deps: deps})
-}
+    cppbuild::target("mystatic", "static", []str{})
+        cppbuild::add_sources("translation_unit", []str{"lib1.cpp"})
+    cppbuild::end()
 
-fn add_sources_to_target*(name: str, type_: str, srcs: []str) {
-    idx := find_phony(name)
-    if idx != -1 {
-        step_name := name + "_" + type_
-        var filtered_deps: []str
-        for _, dep in phony_targets[idx].deps {
-            if dep != step_name {
-                filtered_deps = append(filtered_deps, dep)
-            }
-        }
-        build_targets = append(build_targets, build_target{
-            name:  step_name,
-            type_: type_,
-            deps:  filtered_deps,
-            srcs:  srcs
-        })
-        phony_targets[idx].deps = append(phony_targets[idx].deps, step_name)
-    }
-}
-
-fn end_configure*() {
-    for i, target in phony_targets {
-        if target.type_ == "exe" {
-            build_targets = append(build_targets, build_target{
-                name:  target.name,
-                type_: target.type_,
-                deps:  target.deps,
-                srcs:  []str{}
-            })
-        }
-    }
-}
-
-fn configure*(): []build_target {
-    add_target("target0", "exe", []str{})
-    add_sources_to_target("target0", "named_module", []str{"m4.c++", "m3.cppm", "m2.cc", "m1.cpp"})
-    add_sources_to_target("target0", "translation_unit", []str{"app0.cpp"})
-
-    add_target("target1", "exe", []str{})
-    add_sources_to_target("target1", "header_unit", []str{"h1.hpp", "h2.h", "h3.hh", "h4.h++"})
-    add_sources_to_target("target1", "translation_unit", []str{"h1.cpp", "h2.cpp", "h3.cpp", "h4.cpp", "app1.cpp"})
-
-    end_configure()
-    return build_targets
+    return cppbuild::build_targets
 }

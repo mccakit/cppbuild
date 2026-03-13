@@ -1,0 +1,9 @@
+{
+    "cxx_compiler": "clang++",
+    "c_compiler": "clang",
+    "archiver": "llvm-ar",
+    "cxxflags": ["-std=c++23", "-Wno-experimental-header-units", "-flto=thin"],
+    "cflags": ["-std=c17", "-flto=thin"],
+    "exe_ldflags": ["-flto=thin"],
+    "shared_ldflags": ["-shared", "-flto=thin"]
+}

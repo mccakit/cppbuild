@@ -11,6 +11,7 @@ import std;
 import umka_cxx;
 struct toolchain
 {
+    public:
         std::string cxx_compiler = "clang++";
         std::string c_compiler = "clang";
         std::string archiver = "llvm-ar";
@@ -19,7 +20,10 @@ struct toolchain
         std::vector<std::string> exe_ldflags{"-flto=thin"};
         std::vector<std::string> shared_ldflags{"-flto=thin"};
 };
-
+namespace global
+{
+    std::filesystem::path build_dir;
+}
 auto parse_toolchain(const std::filesystem::path &path, toolchain &tc) -> void
 {
     simdjson::dom::parser parser;

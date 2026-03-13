@@ -1,0 +1,84 @@
+type build_target* = struct {
+    name:     str;
+    type_:    str;
+    srcs:     []str;
+    deps:     []str;
+    cxxflags: []str;
+    cflags:   []str;
+    ldflags:  []str;
+}
+
+type phony_target* = struct {
+    name:          str;
+    type_:         str;
+    deps:          []str;
+    build_targets: []build_target;
+    cxxflags:      []str;
+    cflags:        []str;
+    ldflags:       []str;
+}
+
+var build_targets*: []build_target
+var phony_targets*: []phony_target
+var active_idx*:    int = -1 // Index of the target currently being configured
+
+fn target*(name, type_: str, deps: []str) {
+    phony_targets = append(phony_targets, phony_target{
+        name:  name,
+        type_: type_,
+        deps:  deps
+    })
+    active_idx = len(phony_targets) - 1
+}
+
+fn add_sources*(type_: str, srcs: []str) {
+    if active_idx == -1 { return }
+
+    t := &phony_targets[active_idx]
+    step_name := t.name + "_" + type_
+
+    var filtered_deps: []str
+    for _, dep in t.deps {
+        if dep != step_name {
+            filtered_deps = append(filtered_deps, dep)
+        }
+    }
+
+    build_targets = append(build_targets, build_target{
+        name:     step_name,
+        type_:    type_,
+        deps:     filtered_deps,
+        srcs:     srcs,
+        cxxflags: t.cxxflags,
+        cflags:   t.cflags,
+        ldflags:  t.ldflags
+    })
+
+    t.deps = append(t.deps, step_name)
+}
+
+fn add_cxxflags*(flags: []str) {
+    if active_idx != -1 {
+        for _, f in flags {
+            phony_targets[active_idx].cxxflags = append(phony_targets[active_idx].cxxflags, f)
+        }
+    }
+}
+
+fn end*() {
+    if active_idx == -1 { return }
+
+    t := phony_targets[active_idx]
+    if t.type_ == "exe" || t.type_ == "shared" || t.type_ == "static" {
+        build_targets = append(build_targets, build_target{
+            name:     t.name,
+            type_:    t.type_,
+            deps:     t.deps,
+            srcs:     []str{},
+            cxxflags: t.cxxflags,
+            cflags:   t.cflags,
+            ldflags:  t.ldflags
+        })
+    }
+    active_idx = -1 // Reset
+}
