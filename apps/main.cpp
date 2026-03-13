@@ -82,6 +82,7 @@ struct write_module_commands_options
         graaf::directed_graph<target, int> &graph;
         std::string_view cxx_compiler;
         std::vector<std::string_view> cxxflags;
+        std::filesystem::path output_dir;
 };
 
 struct write_compile_commands_options
@@ -92,11 +93,17 @@ struct write_compile_commands_options
         std::string_view c_compiler;
         std::vector<std::string_view> cxxflags;
         std::vector<std::string_view> cflags;
+        std::filesystem::path output_dir;
 };
 
 auto write_named_module_compile_commands(const write_module_commands_options &opts) -> void
 {
-    fmt::ostream file = fmt::output_file("module_commands.json");
+    if (!opts.output_dir.empty())
+    {
+        std::filesystem::create_directories(opts.output_dir);
+    }
+    const auto output_path = std::filesystem::absolute(opts.output_dir) / "module_commands.json";
+    fmt::ostream file = fmt::output_file(output_path.string());
     file.print("[\n");
     bool first{true};
     for (const auto &[id, t] : opts.graph.get_vertices())
@@ -112,9 +119,8 @@ auto write_named_module_compile_commands(const write_module_commands_options &op
                 file.print(",\n");
             }
             const std::string target_flags = fmt::format("{}", fmt::join(t.cxxflags, " "));
-            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} {} -x c++ -c "
+            file.print("  {{\"directory\":\".\",\"command\":\"{} {} {} -x c++ -c "
                        "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
-                       "build",
                        opts.cxx_compiler,
                        join_flags(opts.cxxflags),
                        target_flags,
@@ -129,11 +135,15 @@ auto write_named_module_compile_commands(const write_module_commands_options &op
 
 auto write_compile_commands(const write_compile_commands_options &opts) -> void
 {
-    fmt::ostream file = fmt::output_file("compile_commands.json");
+    fmt::ostream file = fmt::output_file((opts.output_dir / "compile_commands.json").string());
     file.print("[\n");
     bool first{true};
     for (const auto &[id, t] : opts.graph.get_vertices())
     {
+        if (t.type == "header_unit")
+        {
+            continue;
+        }
         for (const auto &src : t.srcs)
         {
             if (!first)
@@ -144,14 +154,16 @@ auto write_compile_commands(const write_compile_commands_options &opts) -> void
             const auto &compiler = is_c ? opts.c_compiler : opts.cxx_compiler;
             const auto &flags = is_c ? join_flags(opts.cflags) : join_flags(opts.cxxflags);
             const std::string target_flags = fmt::format("{}", fmt::join(is_c ? t.cflags : t.cxxflags, " "));
-            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -c "
-                       "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
-                       "build",
+            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} {} -c "
+                       "{}\",\"file\":\"{}\",\"output\":\"{}/{}.o\"}}",
+                       std::filesystem::absolute(opts.output_dir).string(),
                        compiler,
                        flags,
+                       target_flags,
                        src.string(),
                        src.string(),
-                       src.string());
+                       std::filesystem::absolute(opts.output_dir).string(),
+                       src.stem().string());
             first = false;
         }
     }
@@ -191,11 +203,13 @@ auto fill_module_names(graaf::directed_graph<target, int> &graph, std::string_vi
 auto write_ninja_rules(fmt::ostream &file,
                        const std::string_view cxx_compiler,
                        const std::string_view c_compiler,
-                       const std::string_view archiver) -> void
+                       const std::string_view archiver,
+                       const std::filesystem::path &self_path) -> void
 {
     file.print("rule scan_deps\n");
-    file.print("  command = clang-scan-deps -format=p1689 -compilation-database module_commands.json | ./cppbuild "
-               "--mode=scan $out\n");
+    file.print("  command = clang-scan-deps -format=p1689 -compilation-database module_commands.json | {} "
+               "--mode=scan --compdb_path=$out\n",
+               self_path.string());
     file.print("  description = SCAN\n\n");
     file.print("rule precompile\n");
     file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out "
@@ -205,10 +219,12 @@ auto write_ninja_rules(fmt::ostream &file,
     file.print("rule compile_pcm\n");
     file.print("  command = {} -c $in -o $out -fprebuilt-module-path=. $cxxflags\n", cxx_compiler);
     file.print("  description = OBJ $out\n\n");
+
     file.print("rule precompile_header_unit\n");
     file.print("  command = {} -x c++-header -Wno-experimental-header-units -fmodule-header $in -o $out $cxxflags\n",
                cxx_compiler);
     file.print("  description = PCM $out\n\n");
+
     file.print("rule compile_cxx_translation_unit\n");
     file.print("  command = {} -c $in -o $out -Wno-experimental-header-units -fprebuilt-module-path=. $cxxflags "
                "$header_unit_deps\n",
@@ -251,7 +267,7 @@ auto write_phase_precompile(fmt::ostream &file,
         {
             for (const auto &src : target.srcs)
             {
-                file.print("build {}.pcm: precompile_header_unit {}\n", src.string(), src.string());
+                file.print("build {}.pcm: precompile_header_unit {}\n", src.filename().string(), src.string());
                 if (!cxxflags.empty() or !target.cxxflags.empty())
                 {
                     file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
@@ -323,8 +339,8 @@ auto write_phase_codegen(fmt::ostream &file,
                     {
                         for (const auto &dep_src : dep.srcs)
                         {
-                            dep_pcms += fmt::format(" {}.pcm", dep_src.string());
-                            header_unit_deps += fmt::format(" -fmodule-file={}.pcm", dep_src.string());
+                            dep_pcms += fmt::format(" {}.pcm", dep_src.filename().string());
+                            header_unit_deps += fmt::format(" -fmodule-file={}.pcm", dep_src.filename().string());
                         }
                     }
                     else if (dep.type == "named_module")
@@ -416,19 +432,21 @@ struct write_ninja_options
     public:
         const graaf::directed_graph<target, int> &graph;
         const std::vector<graaf::vertex_id_t> &order;
-        std::string_view cxx_compiler;
-        std::string_view c_compiler;
-        std::string_view archiver;
-        std::vector<std::string_view> cxxflags;
-        std::vector<std::string_view> cflags;
-        std::vector<std::string_view> exe_ldflags;
-        std::vector<std::string_view> shared_ldflags;
+        const std::string_view cxx_compiler;
+        const std::string_view c_compiler;
+        const std::string_view archiver;
+        const std::vector<std::string_view> cxxflags;
+        const std::vector<std::string_view> cflags;
+        const std::vector<std::string_view> exe_ldflags;
+        const std::vector<std::string_view> shared_ldflags;
+        const std::filesystem::path &build_dir;
+        const std::filesystem::path &self_path;
 };
 
 auto write_ninja(write_ninja_options opts) -> void
 {
-    fmt::ostream file{fmt::output_file("build.ninja")};
-    write_ninja_rules(file, opts.cxx_compiler, opts.c_compiler, opts.archiver);
+    fmt::ostream file{fmt::output_file((opts.build_dir / "build.ninja").string())};
+    write_ninja_rules(file, opts.cxx_compiler, opts.c_compiler, opts.archiver, opts.self_path);
     write_phase_precompile(file, opts.graph, opts.order, opts.cxxflags);
     write_phase_codegen(file, opts.graph, opts.order, opts.cxxflags, opts.cflags);
     write_phase_link(file, opts.graph, opts.order, opts.exe_ldflags, opts.shared_ldflags);
@@ -441,10 +459,8 @@ void cmd_scan(const std::filesystem::path &path)
     {
         input += line + "\n";
     }
-
     simdjson::dom::parser parser;
     auto doc = parser.parse(input);
-
     std::unordered_map<std::string, std::string> name_to_pcm;
     for (auto rule : doc["rules"])
     {
@@ -459,10 +475,12 @@ void cmd_scan(const std::filesystem::path &path)
             name_to_pcm[name] = name + ".pcm";
         }
     }
-
+    if (!path.parent_path().empty())
+    {
+        std::filesystem::create_directories(path.parent_path());
+    }
     std::ofstream out(path);
     out << "ninja_dyndep_version = 1\n";
-
     for (auto rule : doc["rules"])
     {
         simdjson::dom::array provides;
@@ -495,11 +513,10 @@ struct graph_result
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
 };
 
-auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets) -> graph_result
+auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets, const std::filesystem::path &src_dir) -> graph_result
 {
     graaf::directed_graph<target, int> graph;
     std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
-
     for (auto &ut : targets)
     {
         target target;
@@ -511,11 +528,10 @@ auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets) -> graph_resul
         target.ldflags = ut.ldflags;
         for (auto &src : ut.srcs)
         {
-            target.srcs.push_back(src);
+            target.srcs.push_back(std::filesystem::weakly_canonical(src_dir / src));
         }
         name_to_id[ut.name] = graph.add_vertex(std::move(target));
     }
-
     for (auto &ut : targets)
     {
         for (auto &dep : ut.deps)
@@ -526,15 +542,14 @@ auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets) -> graph_resul
             }
         }
     }
-
     return {std::move(graph), std::move(name_to_id)};
 }
 
-auto run_scan_deps() -> std::string
+auto run_scan_deps(const std::filesystem::path &output_dir) -> std::string
 {
+    const auto module_commands = (output_dir / "module_commands.json").string();
     const char *command_line[] = {
-        "clang-scan-deps", "-format=p1689", "-compilation-database", "module_commands.json", NULL};
-
+        "clang-scan-deps", "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
     struct subprocess_s subprocess;
     int options =
         subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
@@ -574,9 +589,11 @@ auto quote_flags(const std::vector<std::string> &flags) -> std::string
     return result;
 }
 
-auto save_cache(const toolchain &tc, const graaf::directed_graph<target, int> &graph) -> void
+auto save_cache(const toolchain &tc,
+                const graaf::directed_graph<target, int> &graph,
+                const std::filesystem::path &build_dir) -> void
 {
-    fmt::ostream file = fmt::output_file("cache.json");
+    fmt::ostream file = fmt::output_file((build_dir / "cache.json").string());
     file.print("{{\n");
     file.print("  \"toolchain\": {{\n");
     file.print("    \"cxx_compiler\": \"{}\",\n", tc.cxx_compiler);
@@ -624,7 +641,7 @@ auto save_cache(const toolchain &tc, const graaf::directed_graph<target, int> &g
     file.print("}}\n");
 }
 
-auto load_graph(const std::filesystem::path &path) -> graph_result
+auto load_graph(const std::filesystem::path &path, const std::filesystem::path &src_dir) -> graph_result
 {
     simdjson::dom::parser parser;
     auto doc = parser.load(path.string());
@@ -644,7 +661,7 @@ auto load_graph(const std::filesystem::path &path) -> graph_result
         }
         targets.push_back(std::move(ct));
     }
-    return build_graph(targets);
+    return build_graph(targets, src_dir);
 }
 
 struct cache_result
@@ -652,16 +669,17 @@ struct cache_result
         graph_result graph;
         toolchain toolchain;
 };
+
 auto load_cache(const std::filesystem::path &path) -> cache_result
 {
     simdjson::dom::parser parser;
     simdjson::dom::element doc;
-    cache_result result;
+    cache_result result{};
     if (parser.load(path.string()).get(doc) != simdjson::SUCCESS)
     {
         return result;
     }
-    toolchain tc;
+    toolchain tc{};
     simdjson::dom::element tc_doc;
     if (doc["toolchain"].get(tc_doc) != simdjson::SUCCESS)
     {
@@ -713,7 +731,7 @@ auto load_cache(const std::filesystem::path &path) -> cache_result
     std::vector<umka_cxx::cxxtarget> targets;
     for (auto t : doc["targets"])
     {
-        umka_cxx::cxxtarget ct;
+        umka_cxx::cxxtarget ct{};
         ct.name = std::string(t["name"].get_string().value());
         ct.type = std::string(t["type"].get_string().value());
         for (auto src : t["srcs"].get_array().value())
@@ -728,15 +746,15 @@ auto load_cache(const std::filesystem::path &path) -> cache_result
     }
 
     result.toolchain = tc;
-    result.graph = build_graph(targets);
+    result.graph = build_graph(targets, "");
     return result;
 }
 
-auto reconfigure() -> int
+auto reconfigure(const std::filesystem::path &build_dir, const std::filesystem::path &self_path) -> int
 {
-    cache_result cache = load_cache("cache.json");
+    cache_result cache = load_cache(build_dir / "cache.json");
     graaf::directed_graph<target, int> graph{std::move(cache.graph.g)};
-    fill_module_names(graph, run_scan_deps());
+    fill_module_names(graph, run_scan_deps(build_dir));
     const auto order = graaf::algorithm::dfs_topological_sort(graph);
     if (!order)
     {
@@ -751,33 +769,36 @@ auto reconfigure() -> int
                  .cxxflags = to_views(cache.toolchain.cxxflags),
                  .cflags = to_views(cache.toolchain.cflags),
                  .exe_ldflags = to_views(cache.toolchain.exe_ldflags),
-                 .shared_ldflags = to_views(cache.toolchain.shared_ldflags)});
-    std::filesystem::remove("./modules.dd");
+                 .shared_ldflags = to_views(cache.toolchain.shared_ldflags),
+                 .build_dir = build_dir,
+                 .self_path = self_path});
+    std::filesystem::remove(build_dir / "modules.dd");
     return 0;
 }
 
 auto main(int argc, char **argv) -> int
 {
     cxxopts::Options options("cppbuild", "builds and links c and cpp sources");
-    options.add_options()
-    ("mode", "Program mode", cxxopts::value<std::string>())
-    ("build_dir", "Build directory", cxxopts::value<std::string>())
-    ("src_dir", "Source directory", cxxopts::value<std::string>())
-    ("toolchain", "Toolchain file", cxxopts::value<std::string>())
-    ("compdb_path", "Compilation database path", cxxopts::value<std::string>());
+    options.add_options()("mode", "Program mode", cxxopts::value<std::string>())(
+        "build_dir", "Build directory", cxxopts::value<std::string>())(
+        "src_dir", "Source directory", cxxopts::value<std::string>())(
+        "toolchain", "Toolchain file", cxxopts::value<std::string>())(
+        "compdb_path", "Compilation database path", cxxopts::value<std::string>());
     auto result = options.parse(argc, argv);
     if (result["mode"].as<std::string>() == "configure")
     {
         toolchain toolchain;
         umka_cxx::umka umka{};
         auto targets = umka.run(result["src_dir"].as<std::string>() + "/build.um", "configure");
-        graph_result res{build_graph(targets)};
+        graph_result res{build_graph(targets, result["src_dir"].as<std::string>())};
         graaf::directed_graph<target, int> graph{std::move(res.g)};
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id{std::move(res.name_to_id)};
         parse_toolchain(result["toolchain"].as<std::string>(), toolchain);
-        write_named_module_compile_commands(
-            {.graph = graph, .cxx_compiler = toolchain.cxx_compiler, .cxxflags = to_views(toolchain.cxxflags)});
-        fill_module_names(graph, run_scan_deps());
+        write_named_module_compile_commands({.graph = graph,
+                                             .cxx_compiler = toolchain.cxx_compiler,
+                                             .cxxflags = to_views(toolchain.cxxflags),
+                                             .output_dir = result["build_dir"].as<std::string>()});
+        fill_module_names(graph, run_scan_deps(result["build_dir"].as<std::string>()));
 
         const auto order = graaf::algorithm::dfs_topological_sort(graph);
         if (!order)
@@ -792,32 +813,35 @@ auto main(int argc, char **argv) -> int
                      .cxxflags = to_views(toolchain.cxxflags),
                      .cflags = to_views(toolchain.cflags),
                      .exe_ldflags = to_views(toolchain.exe_ldflags),
-                     .shared_ldflags = to_views(toolchain.shared_ldflags)});
-        save_cache(toolchain, graph);
+                     .shared_ldflags = to_views(toolchain.shared_ldflags),
+                     .build_dir = result["build_dir"].as<std::string>(),
+                     .self_path = std::filesystem::weakly_canonical(argv[0])});
+        save_cache(toolchain, graph, result["build_dir"].as<std::string>());
         write_compile_commands({.graph = graph,
                                 .cxx_compiler = toolchain.cxx_compiler,
                                 .c_compiler = toolchain.c_compiler,
                                 .cxxflags = to_views(toolchain.cxxflags),
-                                .cflags = to_views(toolchain.cflags)});
+                                .cflags = to_views(toolchain.cflags),
+                                .output_dir = result["build_dir"].as<std::string>()});
     }
     else if (result["mode"].as<std::string>() == "scan")
     {
-        cmd_scan(argv[2]);
+        cmd_scan(result["compdb_path"].as<std::string>());
     }
     else if (result["mode"].as<std::string>() == "reconfigure")
     {
-        if (reconfigure() != 0)
+        if (reconfigure(result["build_dir"].as<std::string>(), std::filesystem::weakly_canonical(argv[0])) != 0)
         {
             return 1;
         }
     }
     else if (result["mode"].as<std::string>() == "build")
     {
-        if (reconfigure() != 0)
+        if (reconfigure(result["build_dir"].as<std::string>(), std::filesystem::weakly_canonical(argv[0])) != 0)
         {
             return 1;
         }
-        return std::system("ninja -f build.ninja");
+        return std::system(fmt::format("ninja -C {}", result["build_dir"].as<std::string>()).c_str());
     }
     return 0;
 }
