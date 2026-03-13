@@ -1,6 +1,6 @@
 find_package(PkgConfig REQUIRED)
 add_executable(cppbuild main.cpp)
-target_sources(cppbuild PRIVATE FILE_SET CXX_MODULES FILES umka_conf.cpp)
+target_sources(cppbuild PRIVATE FILE_SET CXX_MODULES FILES umka_cxx.cpp)
 pkg_check_modules(FMT REQUIRED IMPORTED_TARGET fmt)
 pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
 pkg_check_modules(GRAAF REQUIRED IMPORTED_TARGET graaf)
