@@ -16,15 +16,13 @@ struct toolchain
         std::string cxx_compiler = "clang++";
         std::string c_compiler = "clang";
         std::string archiver = "llvm-ar";
+        std::string cxx_scanner = "clang-scan-deps";
         std::vector<std::string> cxxflags = {"-std=c++26", "-Wno-experimental-header-units", "-flto=thin"};
         std::vector<std::string> cflags = {"-std=c23", "-flto=thin"};
         std::vector<std::string> exe_ldflags{"-flto=thin"};
         std::vector<std::string> shared_ldflags{"-flto=thin"};
 };
-namespace global
-{
-    std::filesystem::path build_dir;
-}
+
 auto parse_toolchain(const std::filesystem::path &path, toolchain &tc) -> void
 {
     simdjson::dom::parser parser;
@@ -40,6 +38,10 @@ auto parse_toolchain(const std::filesystem::path &path, toolchain &tc) -> void
     if (auto val = doc["archiver"]; val.error() == simdjson::SUCCESS)
     {
         tc.archiver = std::string(val.get_string().value());
+    }
+    if (auto val = doc["cxx_scanner"]; val.error() == simdjson::SUCCESS)
+    {
+        tc.cxx_scanner = std::string(val.get_string().value());
     }
     auto parse_flags = [&](std::string_view key, std::vector<std::string> &out) {
         simdjson::dom::array arr;
@@ -545,11 +547,12 @@ auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets, const std::fil
     return {std::move(graph), std::move(name_to_id)};
 }
 
-auto run_scan_deps(const std::filesystem::path &output_dir) -> std::string
+auto run_scan_deps(const std::filesystem::path &output_dir, const toolchain &toolchain) -> std::string
 {
     const auto module_commands = (output_dir / "module_commands.json").string();
+    const auto scanner = std::string{toolchain.cxx_scanner};
     const char *command_line[] = {
-        "clang-scan-deps", "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
+        scanner.c_str(), "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
     struct subprocess_s subprocess;
     int options =
         subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
@@ -754,7 +757,7 @@ auto reconfigure(const std::filesystem::path &build_dir, const std::filesystem::
 {
     cache_result cache = load_cache(build_dir / "cache.json");
     graaf::directed_graph<target, int> graph{std::move(cache.graph.g)};
-    fill_module_names(graph, run_scan_deps(build_dir));
+    fill_module_names(graph, run_scan_deps(build_dir, cache.toolchain));
     const auto order = graaf::algorithm::dfs_topological_sort(graph);
     if (!order)
     {
@@ -787,7 +790,7 @@ auto main(int argc, char **argv) -> int
     auto result = options.parse(argc, argv);
     if (result["mode"].as<std::string>() == "configure")
     {
-        toolchain toolchain;
+        toolchain toolchain{};
         umka_cxx::umka umka{};
         auto targets = umka.run(result["src_dir"].as<std::string>() + "/build.um", "configure");
         graph_result res{build_graph(targets, result["src_dir"].as<std::string>())};
@@ -798,7 +801,7 @@ auto main(int argc, char **argv) -> int
                                              .cxx_compiler = toolchain.cxx_compiler,
                                              .cxxflags = to_views(toolchain.cxxflags),
                                              .output_dir = result["build_dir"].as<std::string>()});
-        fill_module_names(graph, run_scan_deps(result["build_dir"].as<std::string>()));
+        fill_module_names(graph, run_scan_deps(result["build_dir"].as<std::string>(), toolchain));
 
         const auto order = graaf::algorithm::dfs_topological_sort(graph);
         if (!order)
