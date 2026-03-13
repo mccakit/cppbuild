@@ -5,6 +5,7 @@
 #include <simdjson.h>
 #include <string_view>
 #include <umka_api.h>
+#include <subprocess.h>
 
 import std;
 import umka_cxx;
@@ -526,14 +527,26 @@ auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets) -> graph_resul
 
 auto run_scan_deps() -> std::string
 {
-    std::string scan_output;
-    FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database module_commands.json", "r");
-    if (!pipe)
+    const char *command_line[] = {
+        "clang-scan-deps", "-format=p1689", "-compilation-database", "module_commands.json", NULL};
+
+    struct subprocess_s subprocess;
+    int options =
+        subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
+    if (subprocess_create(command_line, options, &subprocess) != 0)
+    {
         return "";
+    }
+    std::string scan_output;
     char buf[4096];
-    while (fgets(buf, sizeof(buf), pipe))
-        scan_output += buf;
-    pclose(pipe);
+    unsigned bytes_read;
+    while ((bytes_read = subprocess_read_stdout(&subprocess, buf, sizeof(buf))) != 0)
+    {
+        scan_output.append(buf, bytes_read);
+    }
+    int process_return;
+    subprocess_join(&subprocess, &process_return);
+    subprocess_destroy(&subprocess);
     return scan_output;
 }
 
@@ -752,18 +765,7 @@ auto main(int argc, char **argv) -> int
         parse_toolchain("./tc.json", toolchain);
         write_named_module_compile_commands(
             {.graph = graph, .cxx_compiler = toolchain.cxx_compiler, .cxxflags = to_views(toolchain.cxxflags)});
-        std::string scan_output;
-        {
-            FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database module_commands.json", "r");
-            if (!pipe)
-                return 1;
-            char buf[4096];
-            while (fgets(buf, sizeof(buf), pipe))
-                scan_output += buf;
-            pclose(pipe);
-        }
-
-        fill_module_names(graph, scan_output);
+        fill_module_names(graph, run_scan_deps());
 
         const auto order = graaf::algorithm::dfs_topological_sort(graph);
         if (!order)
