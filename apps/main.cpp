@@ -8,13 +8,55 @@
 
 import std;
 import umka_cxx;
-constexpr std::string_view cxx_compiler = "clang++";
-constexpr std::string_view c_compiler = "clang";
-constexpr std::string_view archiver = "llvm-ar";
-constexpr std::string_view cxxflags = "-std=c++26 -Wno-experimental-header-units";
-constexpr std::string_view cflags = "-std=c23";
-constexpr std::string_view exe_ldflags = "";
-constexpr std::string_view shared_ldflags = "";
+struct toolchain
+{
+        std::string cxx_compiler = "clang++";
+        std::string c_compiler = "clang";
+        std::string archiver = "llvm-ar";
+        std::vector<std::string> cxxflags = {"-std=c++26", "-Wno-experimental-header-units", "-flto=thin"};
+        std::vector<std::string> cflags = {"-std=c23", "-flto=thin"};
+        std::vector<std::string> exe_ldflags{"-flto=thin"};
+        std::vector<std::string> shared_ldflags{"-flto=thin"};
+};
+
+auto parse_toolchain(const std::filesystem::path &path, toolchain &tc) -> void
+{
+    simdjson::dom::parser parser;
+    auto doc = parser.load(path.string());
+    if (auto val = doc["cxx_compiler"]; val.error() == simdjson::SUCCESS)
+    {
+        tc.cxx_compiler = std::string(val.get_string().value());
+    }
+    if (auto val = doc["c_compiler"]; val.error() == simdjson::SUCCESS)
+    {
+        tc.c_compiler = std::string(val.get_string().value());
+    }
+    if (auto val = doc["archiver"]; val.error() == simdjson::SUCCESS)
+    {
+        tc.archiver = std::string(val.get_string().value());
+    }
+    auto parse_flags = [&](std::string_view key, std::vector<std::string> &out) {
+        simdjson::dom::array arr;
+        if (doc[key].get(arr) == simdjson::SUCCESS)
+        {
+            out.clear();
+            for (auto f : arr)
+            {
+                out.push_back(std::string(f.get_string().value()));
+            }
+        }
+    };
+    parse_flags("cxxflags", tc.cxxflags);
+    parse_flags("cflags", tc.cflags);
+    parse_flags("exe_ldflags", tc.exe_ldflags);
+    parse_flags("shared_ldflags", tc.shared_ldflags);
+}
+
+auto join_flags(const std::vector<std::string_view> &flags) -> std::string
+{
+    return fmt::format("{}", fmt::join(flags, " "));
+}
+
 struct target
 {
     public:
@@ -33,7 +75,7 @@ struct write_module_commands_options
     public:
         graaf::directed_graph<target, int> &graph;
         std::string_view cxx_compiler;
-        std::string_view cxxflags;
+        std::vector<std::string_view> cxxflags;
 };
 
 struct write_compile_commands_options
@@ -42,8 +84,8 @@ struct write_compile_commands_options
         graaf::directed_graph<target, int> &graph;
         std::string_view cxx_compiler;
         std::string_view c_compiler;
-        std::string_view cxxflags;
-        std::string_view cflags;
+        std::vector<std::string_view> cxxflags;
+        std::vector<std::string_view> cflags;
 };
 
 auto write_named_module_compile_commands(const write_module_commands_options &opts) -> void
@@ -68,7 +110,7 @@ auto write_named_module_compile_commands(const write_module_commands_options &op
                        "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
                        "build",
                        opts.cxx_compiler,
-                       opts.cxxflags,
+                       join_flags(opts.cxxflags),
                        target_flags,
                        src.string(),
                        src.string(),
@@ -94,7 +136,7 @@ auto write_compile_commands(const write_compile_commands_options &opts) -> void
             }
             const bool is_c = src.extension() == ".c";
             const auto &compiler = is_c ? opts.c_compiler : opts.cxx_compiler;
-            const auto &flags = is_c ? opts.cflags : opts.cxxflags;
+            const auto &flags = is_c ? join_flags(opts.cflags) : join_flags(opts.cxxflags);
             const std::string target_flags = fmt::format("{}", fmt::join(is_c ? t.cflags : t.cxxflags, " "));
             file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -c "
                        "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
@@ -140,25 +182,31 @@ auto fill_module_names(graaf::directed_graph<target, int> &graph, std::string_vi
     }
 }
 
-auto write_ninja_rules(fmt::ostream &file, const std::string_view cxx_compiler, const std::string_view c_compiler)
-    -> void
+auto write_ninja_rules(fmt::ostream &file,
+                       const std::string_view cxx_compiler,
+                       const std::string_view c_compiler,
+                       const std::string_view archiver) -> void
 {
     file.print("rule scan_deps\n");
     file.print("  command = clang-scan-deps -format=p1689 -compilation-database module_commands.json | ./cppbuild "
                "--scan $out\n");
     file.print("  description = SCAN\n\n");
     file.print("rule precompile\n");
-    file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out -fprebuilt-module-path=. $cxxflags\n",
+    file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out "
+               "-fprebuilt-module-path=. $cxxflags\n",
                cxx_compiler);
     file.print("  description = PCM $out\n\n");
     file.print("rule compile_pcm\n");
     file.print("  command = {} -c $in -o $out -fprebuilt-module-path=. $cxxflags\n", cxx_compiler);
     file.print("  description = OBJ $out\n\n");
     file.print("rule precompile_header_unit\n");
-    file.print("  command = {} -x c++-header -Wno-experimental-header-units -fmodule-header $in -o $out $cxxflags\n", cxx_compiler);
+    file.print("  command = {} -x c++-header -Wno-experimental-header-units -fmodule-header $in -o $out $cxxflags\n",
+               cxx_compiler);
     file.print("  description = PCM $out\n\n");
     file.print("rule compile_cxx_translation_unit\n");
-    file.print("  command = {} -c $in -o $out -Wno-experimental-header-units -fprebuilt-module-path=. $cxxflags $header_unit_deps\n", cxx_compiler);
+    file.print("  command = {} -c $in -o $out -Wno-experimental-header-units -fprebuilt-module-path=. $cxxflags "
+               "$header_unit_deps\n",
+               cxx_compiler);
     file.print("  description = OBJ $out\n\n");
     file.print("rule compile_c_translation_unit\n");
     file.print("  command = {} -c $in -o $out $cflags\n", c_compiler);
@@ -174,7 +222,8 @@ auto write_ninja_rules(fmt::ostream &file, const std::string_view cxx_compiler, 
 
 auto write_phase_precompile(fmt::ostream &file,
                             const graaf::directed_graph<target, int> &graph,
-                            const std::vector<graaf::vertex_id_t> &order) -> void
+                            const std::vector<graaf::vertex_id_t> &order,
+                            const std::vector<std::string_view> &cxxflags) -> void
 {
     for (auto id : order)
     {
@@ -186,9 +235,9 @@ auto write_phase_precompile(fmt::ostream &file,
                 const auto &mname = target.src_to_mname.at(src.string());
                 file.print("build {}.pcm: precompile {} || modules.dd\n", mname, src.string());
                 file.print("  dyndep = modules.dd\n");
-                if (!target.cxxflags.empty())
+                if (!target.cxxflags.empty() or !cxxflags.empty())
                 {
-                    file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                    file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
                 }
             }
         }
@@ -197,9 +246,9 @@ auto write_phase_precompile(fmt::ostream &file,
             for (const auto &src : target.srcs)
             {
                 file.print("build {}.pcm: precompile_header_unit {}\n", src.string(), src.string());
-                if (!target.cxxflags.empty())
+                if (!cxxflags.empty() or !target.cxxflags.empty())
                 {
-                    file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                    file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
                 }
             }
         }
@@ -234,7 +283,9 @@ auto collect_deps(const graaf::directed_graph<target, int> &graph, graaf::vertex
 
 auto write_phase_codegen(fmt::ostream &file,
                          const graaf::directed_graph<target, int> &graph,
-                         const std::vector<graaf::vertex_id_t> &order) -> void
+                         const std::vector<graaf::vertex_id_t> &order,
+                         const std::vector<std::string_view> &cxxflags,
+                         const std::vector<std::string_view> &cflags) -> void
 {
     for (auto id : order)
     {
@@ -246,9 +297,9 @@ auto write_phase_codegen(fmt::ostream &file,
             {
                 const auto &mname = target.src_to_mname.at(src.string());
                 file.print("build {}.o: compile_pcm {}.pcm\n", mname, mname);
-                if (!target.cxxflags.empty())
+                if (!target.cxxflags.empty() or !target.cflags.empty())
                 {
-                    file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                    file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
                 }
             }
         }
@@ -258,7 +309,7 @@ auto write_phase_codegen(fmt::ostream &file,
             {
                 const bool is_c = src.extension() == ".c";
                 std::string dep_pcms;
-                std::string header_unit_flags;
+                std::string header_unit_deps;
                 for (auto dep_id : deps)
                 {
                     const auto &dep = graph.get_vertex(dep_id);
@@ -267,7 +318,7 @@ auto write_phase_codegen(fmt::ostream &file,
                         for (const auto &dep_src : dep.srcs)
                         {
                             dep_pcms += fmt::format(" {}.pcm", dep_src.string());
-                            header_unit_flags += fmt::format(" -fmodule-file={}.pcm", dep_src.string());
+                            header_unit_deps += fmt::format(" -fmodule-file={}.pcm", dep_src.string());
                         }
                     }
                     else if (dep.type == "named_module")
@@ -283,9 +334,9 @@ auto write_phase_codegen(fmt::ostream &file,
                 {
                     file.print(
                         "build {}.o: compile_c_translation_unit {}{}\n", src.stem().string(), src.string(), order_only);
-                    if (!target.cflags.empty())
+                    if (!target.cflags.empty() or !cflags.empty())
                     {
-                        file.print("  cflags = {}\n", fmt::join(target.cflags, " "));
+                        file.print("  cflags = {} {}\n", fmt::join(cflags, " "), fmt::join(target.cflags, " "));
                     }
                 }
                 else
@@ -294,13 +345,13 @@ auto write_phase_codegen(fmt::ostream &file,
                                src.stem().string(),
                                src.string(),
                                order_only);
-                    if (!target.cxxflags.empty())
+                    if (!target.cxxflags.empty() or !cxxflags.empty())
                     {
-                        file.print("  cxxflags = {}\n", fmt::join(target.cxxflags, " "));
+                        file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
                     }
-                    if (!header_unit_flags.empty())
+                    if (!header_unit_deps.empty())
                     {
-                        file.print("  header_unit_deps ={}\n", header_unit_flags);
+                        file.print("  header_unit_deps ={}\n", header_unit_deps);
                     }
                 }
             }
@@ -311,7 +362,9 @@ auto write_phase_codegen(fmt::ostream &file,
 
 auto write_phase_link(fmt::ostream &file,
                       const graaf::directed_graph<target, int> &graph,
-                      const std::vector<graaf::vertex_id_t> &order) -> void
+                      const std::vector<graaf::vertex_id_t> &order,
+                      const std::vector<std::string_view> &exe_ldflags,
+                      const std::vector<std::string_view> &shared_ldflags) -> void
 {
     for (auto id : order)
     {
@@ -331,17 +384,19 @@ auto write_phase_link(fmt::ostream &file,
         if (target.type == "exe")
         {
             file.print("build {}.elf: link{}\n", target.name, objs);
-            if (!target.ldflags.empty())
+            if (!target.ldflags.empty() or !exe_ldflags.empty())
             {
-                file.print("  ldflags = {}\n", fmt::join(target.ldflags, " "));
+                file.print("  ldflags = {} {}\n", fmt::join(exe_ldflags, " "), fmt::join(target.ldflags, " "));
             }
         }
         else if (target.type == "shared")
         {
             file.print("build lib{}.so: link{}\n", target.name, objs);
-            std::vector<std::string> ldflags = target.ldflags;
-            ldflags.insert(ldflags.begin(), "-shared");
-            file.print("  ldflags = {}\n", fmt::join(ldflags, " "));
+            if (!shared_ldflags.empty() or !target.ldflags.empty())
+            {
+                file.print(
+                    "  ldflags = {} {} -shared \n", fmt::join(shared_ldflags, " "), fmt::join(target.ldflags, " "));
+            }
         }
         else if (target.type == "static")
         {
@@ -357,15 +412,20 @@ struct write_ninja_options
         const std::vector<graaf::vertex_id_t> &order;
         std::string_view cxx_compiler;
         std::string_view c_compiler;
+        std::string_view archiver;
+        std::vector<std::string_view> cxxflags;
+        std::vector<std::string_view> cflags;
+        std::vector<std::string_view> exe_ldflags;
+        std::vector<std::string_view> shared_ldflags;
 };
 
 auto write_ninja(write_ninja_options opts) -> void
 {
     fmt::ostream file{fmt::output_file("build.ninja")};
-    write_ninja_rules(file, opts.cxx_compiler, opts.c_compiler);
-    write_phase_precompile(file, opts.graph, opts.order);
-    write_phase_codegen(file, opts.graph, opts.order);
-    write_phase_link(file, opts.graph, opts.order);
+    write_ninja_rules(file, opts.cxx_compiler, opts.c_compiler, opts.archiver);
+    write_phase_precompile(file, opts.graph, opts.order, opts.cxxflags);
+    write_phase_codegen(file, opts.graph, opts.order, opts.cxxflags, opts.cflags);
+    write_phase_link(file, opts.graph, opts.order, opts.exe_ldflags, opts.shared_ldflags);
 }
 
 void cmd_scan(const std::filesystem::path &path)
@@ -464,10 +524,52 @@ auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets) -> graph_resul
     return {std::move(graph), std::move(name_to_id)};
 }
 
-auto save_graph(const std::filesystem::path &path, const graaf::directed_graph<target, int> &graph) -> void
+auto run_scan_deps() -> std::string
 {
-    fmt::ostream file = fmt::output_file(path.c_str());
-    file.print("{{\"targets\":[\n");
+    std::string scan_output;
+    FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database module_commands.json", "r");
+    if (!pipe)
+        return "";
+    char buf[4096];
+    while (fgets(buf, sizeof(buf), pipe))
+        scan_output += buf;
+    pclose(pipe);
+    return scan_output;
+}
+
+auto to_views(const std::vector<std::string> &vec) -> std::vector<std::string_view>
+{
+    return {vec.begin(), vec.end()};
+}
+
+auto quote_flags(const std::vector<std::string> &flags) -> std::string
+{
+    std::string result;
+    for (size_t i = 0; i < flags.size(); i++)
+    {
+        result += fmt::format("\"{}\"", flags[i]);
+        if (i + 1 < flags.size())
+        {
+            result += ",";
+        }
+    }
+    return result;
+}
+
+auto save_cache(const toolchain &tc, const graaf::directed_graph<target, int> &graph) -> void
+{
+    fmt::ostream file = fmt::output_file("cache.json");
+    file.print("{{\n");
+    file.print("  \"toolchain\": {{\n");
+    file.print("    \"cxx_compiler\": \"{}\",\n", tc.cxx_compiler);
+    file.print("    \"c_compiler\": \"{}\",\n", tc.c_compiler);
+    file.print("    \"archiver\": \"{}\",\n", tc.archiver);
+    file.print("    \"cxxflags\": [{}],\n", quote_flags(tc.cxxflags));
+    file.print("    \"cflags\": [{}],\n", quote_flags(tc.cflags));
+    file.print("    \"exe_ldflags\": [{}],\n", quote_flags(tc.exe_ldflags));
+    file.print("    \"shared_ldflags\": [{}]\n", quote_flags(tc.shared_ldflags));
+    file.print("  }},\n");
+    file.print("  \"targets\": [\n");
     bool first{true};
     for (const auto &[id, t] : graph.get_vertices())
     {
@@ -475,7 +577,7 @@ auto save_graph(const std::filesystem::path &path, const graaf::directed_graph<t
         {
             file.print(",\n");
         }
-        file.print("  {{\"name\":\"{}\",\"type\":\"{}\",\"srcs\":[", t.name, t.type);
+        file.print("    {{\"name\":\"{}\",\"type\":\"{}\",\"srcs\":[", t.name, t.type);
         bool first_src{true};
         for (const auto &src : t.srcs)
         {
@@ -500,7 +602,8 @@ auto save_graph(const std::filesystem::path &path, const graaf::directed_graph<t
         file.print("]}}\n");
         first = false;
     }
-    file.print("]}}\n");
+    file.print("  ]\n");
+    file.print("}}\n");
 }
 
 auto load_graph(const std::filesystem::path &path) -> graph_result
@@ -526,25 +629,95 @@ auto load_graph(const std::filesystem::path &path) -> graph_result
     return build_graph(targets);
 }
 
-auto run_scan_deps() -> std::string
+struct cache_result
 {
-    std::string scan_output;
-    FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database module_commands.json", "r");
-    if (!pipe)
-        return "";
-    char buf[4096];
-    while (fgets(buf, sizeof(buf), pipe))
-        scan_output += buf;
-    pclose(pipe);
-    return scan_output;
+        graph_result graph;
+        toolchain toolchain;
+};
+auto load_cache(const std::filesystem::path &path) -> cache_result
+{
+    simdjson::dom::parser parser;
+    simdjson::dom::element doc;
+    cache_result result;
+    if (parser.load(path.string()).get(doc) != simdjson::SUCCESS)
+    {
+        return result;
+    }
+    toolchain tc;
+    simdjson::dom::element tc_doc;
+    if (doc["toolchain"].get(tc_doc) != simdjson::SUCCESS)
+    {
+        return result;
+    }
+    if (auto val = tc_doc["cxx_compiler"]; val.error() == simdjson::SUCCESS)
+    {
+        tc.cxx_compiler = std::string(val.get_string().value());
+    }
+    if (auto val = tc_doc["c_compiler"]; val.error() == simdjson::SUCCESS)
+    {
+        tc.c_compiler = std::string(val.get_string().value());
+    }
+    if (auto val = tc_doc["archiver"]; val.error() == simdjson::SUCCESS)
+    {
+        tc.archiver = std::string(val.get_string().value());
+    }
+
+    simdjson::dom::array arr;
+    if (tc_doc["cxxflags"].get(arr) == simdjson::SUCCESS)
+    {
+        for (auto f : arr)
+        {
+            tc.cxxflags.push_back(std::string(f.get_string().value()));
+        }
+    }
+    if (tc_doc["cflags"].get(arr) == simdjson::SUCCESS)
+    {
+        for (auto f : arr)
+        {
+            tc.cflags.push_back(std::string(f.get_string().value()));
+        }
+    }
+    if (tc_doc["exe_ldflags"].get(arr) == simdjson::SUCCESS)
+    {
+        for (auto f : arr)
+        {
+            tc.exe_ldflags.push_back(std::string(f.get_string().value()));
+        }
+    }
+    if (tc_doc["shared_ldflags"].get(arr) == simdjson::SUCCESS)
+    {
+        for (auto f : arr)
+        {
+            tc.shared_ldflags.push_back(std::string(f.get_string().value()));
+        }
+    }
+
+    std::vector<umka_cxx::cxxtarget> targets;
+    for (auto t : doc["targets"])
+    {
+        umka_cxx::cxxtarget ct;
+        ct.name = std::string(t["name"].get_string().value());
+        ct.type = std::string(t["type"].get_string().value());
+        for (auto src : t["srcs"].get_array().value())
+        {
+            ct.srcs.push_back(std::string(src.get_string().value()));
+        }
+        for (auto dep : t["deps"].get_array().value())
+        {
+            ct.deps.push_back(std::string(dep.get_string().value()));
+        }
+        targets.push_back(std::move(ct));
+    }
+
+    result.toolchain = tc;
+    result.graph = build_graph(targets);
+    return result;
 }
 
 auto reconfigure() -> int
 {
-    graph_result res{load_graph("depgraph.json")};
-    graaf::directed_graph<target, int> graph{std::move(res.g)};
-    const std::string cxx = "clang++";
-    const std::string flags = "-std=c++26 -Wno-experimental-header-units";
+    cache_result cache = load_cache("cache.json");
+    graaf::directed_graph<target, int> graph{std::move(cache.graph.g)};
     fill_module_names(graph, run_scan_deps());
     const auto order = graaf::algorithm::dfs_topological_sort(graph);
     if (!order)
@@ -552,7 +725,15 @@ auto reconfigure() -> int
         fmt::println("Reconfigure failed");
         return 1;
     }
-    write_ninja({.graph = graph, .order = *order, .cxx_compiler = cxx_compiler, .c_compiler = c_compiler});;
+    write_ninja({.graph = graph,
+                 .order = *order,
+                 .cxx_compiler = cache.toolchain.cxx_compiler,
+                 .c_compiler = cache.toolchain.c_compiler,
+                 .archiver = cache.toolchain.archiver,
+                 .cxxflags = to_views(cache.toolchain.cxxflags),
+                 .cflags = to_views(cache.toolchain.cflags),
+                 .exe_ldflags = to_views(cache.toolchain.exe_ldflags),
+                 .shared_ldflags = to_views(cache.toolchain.shared_ldflags)});
     std::filesystem::remove("./modules.dd");
     return 0;
 }
@@ -562,12 +743,15 @@ auto main(int argc, char **argv) -> int
     const std::string_view cmd = argv[1];
     if (cmd == "--configure")
     {
+        toolchain toolchain;
         umka_cxx::umka umka{};
         auto targets = umka.run(argv[2], "configure");
         graph_result res{build_graph(targets)};
         graaf::directed_graph<target, int> graph{std::move(res.g)};
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id{std::move(res.name_to_id)};
-        write_named_module_compile_commands({.graph = graph, .cxx_compiler = cxx_compiler, .cxxflags = cxxflags});
+        parse_toolchain("./tc.json", toolchain);
+        write_named_module_compile_commands(
+            {.graph = graph, .cxx_compiler = toolchain.cxx_compiler, .cxxflags = to_views(toolchain.cxxflags)});
         std::string scan_output;
         {
             FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database module_commands.json", "r");
@@ -586,10 +770,21 @@ auto main(int argc, char **argv) -> int
         {
             return 1;
         }
-        write_ninja({.graph = graph, .order = *order, .cxx_compiler = cxx_compiler, .c_compiler = c_compiler});
-        save_graph("depgraph.json", graph);
-        write_compile_commands(
-            {.graph = graph, .cxx_compiler = cxx_compiler, .c_compiler = "", .cxxflags = cxxflags, .cflags = cflags});
+        write_ninja({.graph = graph,
+                     .order = *order,
+                     .cxx_compiler = toolchain.cxx_compiler,
+                     .c_compiler = toolchain.c_compiler,
+                     .archiver = toolchain.archiver,
+                     .cxxflags = to_views(toolchain.cxxflags),
+                     .cflags = to_views(toolchain.cflags),
+                     .exe_ldflags = to_views(toolchain.exe_ldflags),
+                     .shared_ldflags = to_views(toolchain.shared_ldflags)});
+        save_cache(toolchain, graph);
+        write_compile_commands({.graph = graph,
+                                .cxx_compiler = toolchain.cxx_compiler,
+                                .c_compiler = toolchain.c_compiler,
+                                .cxxflags = to_views(toolchain.cxxflags),
+                                .cflags = to_views(toolchain.cflags)});
     }
     else if (cmd == "--scan")
     {
