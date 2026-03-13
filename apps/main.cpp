@@ -6,6 +6,7 @@
 #include <string_view>
 #include <umka_api.h>
 #include <subprocess.h>
+#include "cxxopts.hpp"
 
 import std;
 import umka_cxx;
@@ -194,7 +195,7 @@ auto write_ninja_rules(fmt::ostream &file,
 {
     file.print("rule scan_deps\n");
     file.print("  command = clang-scan-deps -format=p1689 -compilation-database module_commands.json | ./cppbuild "
-               "--scan $out\n");
+               "--mode=scan $out\n");
     file.print("  description = SCAN\n\n");
     file.print("rule precompile\n");
     file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out "
@@ -757,16 +758,23 @@ auto reconfigure() -> int
 
 auto main(int argc, char **argv) -> int
 {
-    const std::string_view cmd = argv[1];
-    if (cmd == "--configure")
+    cxxopts::Options options("cppbuild", "builds and links c and cpp sources");
+    options.add_options()
+    ("mode", "Program mode", cxxopts::value<std::string>())
+    ("build_dir", "Build directory", cxxopts::value<std::string>())
+    ("src_dir", "Source directory", cxxopts::value<std::string>())
+    ("toolchain", "Toolchain file", cxxopts::value<std::string>())
+    ("compdb_path", "Compilation database path", cxxopts::value<std::string>());
+    auto result = options.parse(argc, argv);
+    if (result["mode"].as<std::string>() == "configure")
     {
         toolchain toolchain;
         umka_cxx::umka umka{};
-        auto targets = umka.run(argv[2], "configure");
+        auto targets = umka.run(result["src_dir"].as<std::string>() + "/build.um", "configure");
         graph_result res{build_graph(targets)};
         graaf::directed_graph<target, int> graph{std::move(res.g)};
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id{std::move(res.name_to_id)};
-        parse_toolchain("./tc.json", toolchain);
+        parse_toolchain(result["toolchain"].as<std::string>(), toolchain);
         write_named_module_compile_commands(
             {.graph = graph, .cxx_compiler = toolchain.cxx_compiler, .cxxflags = to_views(toolchain.cxxflags)});
         fill_module_names(graph, run_scan_deps());
@@ -792,18 +800,18 @@ auto main(int argc, char **argv) -> int
                                 .cxxflags = to_views(toolchain.cxxflags),
                                 .cflags = to_views(toolchain.cflags)});
     }
-    else if (cmd == "--scan")
+    else if (result["mode"].as<std::string>() == "scan")
     {
         cmd_scan(argv[2]);
     }
-    else if (cmd == "--reconfigure")
+    else if (result["mode"].as<std::string>() == "reconfigure")
     {
         if (reconfigure() != 0)
         {
             return 1;
         }
     }
-    else if (cmd == "--build")
+    else if (result["mode"].as<std::string>() == "build")
     {
         if (reconfigure() != 0)
         {
