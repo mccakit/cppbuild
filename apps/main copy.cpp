@@ -17,85 +17,34 @@ struct target
         std::map<std::string, std::string> src_to_mname;
         std::string type;
         std::vector<std::string> deps;
-        std::vector<std::string> cxxflags;
-        std::vector<std::string> cflags;
-        std::vector<std::string> ldflags;
 };
 
-struct write_module_commands_options
+struct write_compilation_database_options
 {
     public:
         graaf::directed_graph<target, int> &graph;
-        std::string_view cxx_compiler;
-        std::string_view cxxflags;
+        std::string_view cxx;
+        std::string_view flags;
 };
 
-struct write_compile_commands_options
-{
-    public:
-        graaf::directed_graph<target, int> &graph;
-        std::string_view cxx_compiler;
-        std::string_view c_compiler;
-        std::string_view cxxflags;
-        std::string_view cflags;
-};
-
-auto write_named_module_compile_commands(const write_module_commands_options &opts) -> void
-{
-    fmt::ostream file = fmt::output_file("module_commands.json");
-    file.print("[\n");
-    bool first{true};
-    for (const auto &[id, t] : opts.graph.get_vertices())
-    {
-        if (t.type != "named_module")
-        {
-            continue;
-        }
-        for (const auto &src : t.srcs)
-        {
-            if (!first)
-            {
-                file.print(",\n");
-            }
-            const std::string target_flags = fmt::format("{}", fmt::join(t.cxxflags, " "));
-            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} {} -x c++ -c "
-                       "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
-                       "build",
-                       opts.cxx_compiler,
-                       opts.cxxflags,
-                       target_flags,
-                       src.string(),
-                       src.string(),
-                       src.string());
-            first = false;
-        }
-    }
-    file.print("\n]\n");
-}
-
-auto write_compile_commands(const write_compile_commands_options &opts) -> void
+auto write_compilation_database(const write_compilation_database_options &opts) -> void
 {
     fmt::ostream file = fmt::output_file("compile_commands.json");
     file.print("[\n");
     bool first{true};
     for (const auto &[id, t] : opts.graph.get_vertices())
     {
+        if (t.type != "named_module")
+            continue;
         for (const auto &src : t.srcs)
         {
             if (!first)
-            {
                 file.print(",\n");
-            }
-            const bool is_c = src.extension() == ".c";
-            const auto &compiler = is_c ? opts.c_compiler : opts.cxx_compiler;
-            const auto &global_flags = is_c ? opts.cflags : opts.cxxflags;
-            const std::string target_flags = fmt::format("{}", fmt::join(is_c ? t.cflags : t.cxxflags, " "));
-            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} {} -c "
+            file.print("  {{\"directory\":\"{}\",\"command\":\"{} {} -x c++ -c "
                        "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
                        "build",
-                       compiler,
-                       global_flags,
-                       target_flags,
+                       opts.cxx,
+                       opts.flags,
                        src.string(),
                        src.string(),
                        src.string());
@@ -138,8 +87,8 @@ auto fill_module_names(graaf::directed_graph<target, int> &graph, std::string_vi
 auto write_ninja_rules(fmt::ostream &file, const std::string_view cxx, const std::string_view flags) -> void
 {
     file.print("rule scan_deps\n");
-    file.print("  command = clang-scan-deps -format=p1689 -compilation-database module_commands.json | ./cppbuild "
-               "--scan $out\n");
+    file.print("  command = clang-scan-deps -format=p1689 -compilation-database compile_commands.json | ./cppbuild "
+               "scan $out\n");
     file.print("  description = SCAN\n\n");
     file.print("rule precompile\n");
     file.print("  command = {} {} --precompile -x c++-module $in -o $out -fprebuilt-module-path=.\n", cxx, flags);
@@ -156,7 +105,7 @@ auto write_ninja_rules(fmt::ostream &file, const std::string_view cxx, const std
     file.print("rule link\n");
     file.print("  command = {} $in -o $out\n", cxx);
     file.print("  description = LINK $out\n\n");
-    file.print("build modules.dd: scan_deps module_commands.json\n\n");
+    file.print("build modules.dd: scan_deps compile_commands.json\n\n");
 }
 
 auto write_phase_precompile(fmt::ostream &file,
@@ -308,7 +257,7 @@ auto write_ninja(write_ninja_options opts) -> void
     write_phase_link(file, opts.graph, opts.order);
 }
 
-void cmd_scan(const std::filesystem::path &path)
+void cmd_scan(int argc, char **argv)
 {
     std::string input;
     for (std::string line; std::getline(std::cin, line);)
@@ -334,7 +283,7 @@ void cmd_scan(const std::filesystem::path &path)
         }
     }
 
-    std::ofstream out(path);
+    std::ofstream out(argv[2]);
     out << "ninja_dyndep_version = 1\n";
 
     for (auto rule : doc["rules"])
@@ -401,115 +350,25 @@ auto build_graph(const std::vector<umka_cxx::cxxtarget> &targets) -> graph_resul
     return {std::move(graph), std::move(name_to_id)};
 }
 
-auto save_graph(const std::filesystem::path &path, const graaf::directed_graph<target, int> &graph) -> void
-{
-    fmt::ostream file = fmt::output_file(path.c_str());
-    file.print("{{\"targets\":[\n");
-    bool first{true};
-    for (const auto &[id, t] : graph.get_vertices())
-    {
-        if (!first)
-        {
-            file.print(",\n");
-        }
-        file.print("  {{\"name\":\"{}\",\"type\":\"{}\",\"srcs\":[", t.name, t.type);
-        bool first_src{true};
-        for (const auto &src : t.srcs)
-        {
-            if (!first_src)
-            {
-                file.print(",");
-            }
-            file.print("\"{}\"", src.string());
-            first_src = false;
-        }
-        file.print("],\"deps\":[");
-        bool first_dep{true};
-        for (const auto &dep : t.deps)
-        {
-            if (!first_dep)
-            {
-                file.print(",");
-            }
-            file.print("\"{}\"", dep);
-            first_dep = false;
-        }
-        file.print("]}}\n");
-        first = false;
-    }
-    file.print("]}}\n");
-}
-
-auto load_graph(const std::filesystem::path &path) -> graph_result
-{
-    simdjson::dom::parser parser;
-    auto doc = parser.load(path.string());
-    std::vector<umka_cxx::cxxtarget> targets;
-    for (auto t : doc["targets"])
-    {
-        umka_cxx::cxxtarget ct;
-        ct.name = std::string(t["name"].get_string().value());
-        ct.type = std::string(t["type"].get_string().value());
-        for (auto src : t["srcs"].get_array().value())
-        {
-            ct.srcs.push_back(std::string(src.get_string().value()));
-        }
-        for (auto dep : t["deps"].get_array().value())
-        {
-            ct.deps.push_back(std::string(dep.get_string().value()));
-        }
-        targets.push_back(std::move(ct));
-    }
-    return build_graph(targets);
-}
-
-auto run_scan_deps() -> std::string
-{
-    std::string scan_output;
-    FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database module_commands.json", "r");
-    if (!pipe)
-        return "";
-    char buf[4096];
-    while (fgets(buf, sizeof(buf), pipe))
-        scan_output += buf;
-    pclose(pipe);
-    return scan_output;
-}
-
-auto reconfigure() -> int
-{
-    graph_result res{load_graph("depgraph.json")};
-    graaf::directed_graph<target, int> graph{std::move(res.g)};
-    const std::string cxx = "clang++";
-    const std::string flags = "-std=c++26 -Wno-experimental-header-units";
-    fill_module_names(graph, run_scan_deps());
-    const auto order = graaf::algorithm::dfs_topological_sort(graph);
-    if (!order)
-    {
-        fmt::println("Reconfigure failed");
-        return 1;
-    }
-    write_ninja({.graph = graph, .order = *order, .cxx = cxx, .flags = flags});
-    std::filesystem::remove("./modules.dd");
-    return 0;
-}
-
 auto main(int argc, char **argv) -> int
 {
     const std::string_view cmd = argv[1];
-    if (cmd == "--configure")
+    if (cmd == "configure")
     {
         umka_cxx::umka umka{};
         auto targets = umka.run(argv[2], "configure");
         graph_result res{build_graph(targets)};
         graaf::directed_graph<target, int> graph{std::move(res.g)};
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id{std::move(res.name_to_id)};
-        const std::string cxx_compiler = "clang++";
-        const std::string cxxflags = "-std=c++26 -Wno-experimental-header-units";
-        write_named_module_compile_commands({.graph = graph, .cxx_compiler = cxx_compiler, .cxxflags = cxxflags});
+        const std::string dir = std::filesystem::current_path().string();
+        const std::string cxx = "clang++";
+        const std::string flags = "-std=c++26 -Wno-experimental-header-units";
+
+        write_compilation_database({.graph = graph, .cxx = cxx, .flags = flags});
+
         std::string scan_output;
         {
-            FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database module_commands.json", "r");
+            FILE *pipe = popen("clang-scan-deps -format=p1689 -compilation-database compile_commands.json", "r");
             if (!pipe)
                 return 1;
             char buf[4096];
@@ -525,28 +384,11 @@ auto main(int argc, char **argv) -> int
         {
             return 1;
         }
-        write_ninja({.graph = graph, .order = *order, .cxx = cxx_compiler, .flags = cxxflags});
-        save_graph("depgraph.json", graph);
-        write_compile_commands({.graph = graph, .cxx_compiler = cxx_compiler, .c_compiler = "", .cxxflags = cxxflags, .cflags = ""});
+        write_ninja({.graph = graph, .order = *order, .cxx = cxx, .flags = flags});
     }
-    else if (cmd == "--scan")
+    else if (cmd == "scan")
     {
-        cmd_scan(argv[2]);
-    }
-    else if (cmd == "--reconfigure")
-    {
-        if (reconfigure() != 0)
-        {
-            return 1;
-        }
-    }
-    else if (cmd == "--build")
-    {
-        if (reconfigure() != 0)
-        {
-            return 1;
-        }
-        return std::system("ninja -f build.ninja");
+        cmd_scan(argc, argv);
     }
     return 0;
 }
