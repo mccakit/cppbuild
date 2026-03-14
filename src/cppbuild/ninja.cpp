@@ -9,14 +9,13 @@ module;
 export module cppbuild.ninja;
 import std;
 import cppbuild.types;
+import cppbuild.helpers;
 export namespace cppbuild::ninja
 {
     using namespace cppbuild;
-    auto write_ninja_rules(fmt::ostream &file,
-                           const std::string_view cxx_compiler,
-                           const std::string_view c_compiler,
-                           const std::string_view archiver,
-                           const std::filesystem::path &self_path) -> void
+    auto write_ninja_build_rules(fmt::ostream &file,
+                                 const types::toolchain &toolchain,
+                                 const std::filesystem::path &self_path) -> void
     {
         file.print("rule scan_deps\n");
         file.print("  command = clang-scan-deps -format=p1689 -compilation-database module_commands.json | {} "
@@ -26,39 +25,36 @@ export namespace cppbuild::ninja
         file.print("rule precompile\n");
         file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out "
                    "-fprebuilt-module-path=. $cxxflags\n",
-                   cxx_compiler);
+                   toolchain.cxx_compiler);
         file.print("  description = PCM $out\n\n");
         file.print("rule compile_pcm\n");
-        file.print("  command = {} -c $in -o $out -fprebuilt-module-path=. $cxxflags\n", cxx_compiler);
+        file.print("  command = {} -c $in -o $out -fprebuilt-module-path=. $cxxflags\n", toolchain.cxx_compiler);
         file.print("  description = OBJ $out\n\n");
-
         file.print("rule precompile_header_unit\n");
         file.print(
             "  command = {} -x c++-header -Wno-experimental-header-units -fmodule-header $in -o $out $cxxflags\n",
-            cxx_compiler);
+            toolchain.cxx_compiler);
         file.print("  description = PCM $out\n\n");
-
         file.print("rule compile_cxx_translation_unit\n");
         file.print("  command = {} -c $in -o $out -Wno-experimental-header-units -fprebuilt-module-path=. $cxxflags "
                    "$header_unit_deps\n",
-                   cxx_compiler);
+                   toolchain.cxx_compiler);
         file.print("  description = OBJ $out\n\n");
         file.print("rule compile_c_translation_unit\n");
-        file.print("  command = {} -c $in -o $out $cflags\n", c_compiler);
+        file.print("  command = {} -c $in -o $out $cflags\n", toolchain.c_compiler);
         file.print("  description = OBJ $out\n\n");
         file.print("rule link\n");
-        file.print("  command = {} $in -o $out $ldflags\n", cxx_compiler);
+        file.print("  command = {} $in -o $out $ldflags\n", toolchain.cxx_compiler);
         file.print("  description = LINK $out\n\n");
         file.print("build modules.dd: scan_deps module_commands.json\n\n");
         file.print("rule archive\n");
-        file.print("  command = {} rcs $out $in\n", archiver);
+        file.print("  command = {} rcs $out $in\n", toolchain.archiver);
         file.print("  description = AR $out\n\n");
     }
-
-    auto write_phase_precompile(fmt::ostream &file,
-                                const graaf::directed_graph<cppbuild::types::target, int> &graph,
-                                const std::vector<graaf::vertex_id_t> &order,
-                                const std::vector<std::string_view> &cxxflags) -> void
+    auto write_ninja_build_precompile_edges(fmt::ostream &file,
+                                            const graaf::directed_graph<types::target, int> &graph,
+                                            const std::vector<graaf::vertex_id_t> &order,
+                                            const types::toolchain &toolchain) -> void
     {
         for (auto id : order)
         {
@@ -70,9 +66,11 @@ export namespace cppbuild::ninja
                     const auto &mname = target.src_to_mname.at(src.string());
                     file.print("build {}.pcm: precompile {} || modules.dd\n", mname, src.string());
                     file.print("  dyndep = modules.dd\n");
-                    if (!target.cxxflags.empty() or !cxxflags.empty())
+                    if (!target.cxxflags.empty() or !toolchain.cxxflags.empty())
                     {
-                        file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
+                        file.print("  cxxflags = {} {}\n",
+                                   fmt::join(toolchain.cxxflags, " "),
+                                   fmt::join(target.cxxflags, " "));
                     }
                 }
             }
@@ -81,16 +79,17 @@ export namespace cppbuild::ninja
                 for (const auto &src : target.srcs)
                 {
                     file.print("build {}.pcm: precompile_header_unit {}\n", src.filename().string(), src.string());
-                    if (!cxxflags.empty() or !target.cxxflags.empty())
+                    if (!toolchain.cxxflags.empty() or !target.cxxflags.empty())
                     {
-                        file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
+                        file.print("  cxxflags = {} {}\n",
+                                   fmt::join(toolchain.cxxflags, " "),
+                                   fmt::join(target.cxxflags, " "));
                     }
                 }
             }
         }
         file.print("\n");
     }
-
     auto collect_deps(const graaf::directed_graph<cppbuild::types::target, int> &graph, graaf::vertex_id_t id)
         -> std::vector<graaf::vertex_id_t>
     {
@@ -115,12 +114,10 @@ export namespace cppbuild::ninja
         }
         return deps;
     }
-
-    auto write_phase_codegen(fmt::ostream &file,
-                             const graaf::directed_graph<cppbuild::types::target, int> &graph,
-                             const std::vector<graaf::vertex_id_t> &order,
-                             const std::vector<std::string_view> &cxxflags,
-                             const std::vector<std::string_view> &cflags) -> void
+    auto write_ninja_build_codegen_edges(fmt::ostream &file,
+                                         const graaf::directed_graph<cppbuild::types::target, int> &graph,
+                                         const std::vector<graaf::vertex_id_t> &order,
+                                         const types::toolchain &toolchain) -> void
     {
         for (auto id : order)
         {
@@ -134,7 +131,9 @@ export namespace cppbuild::ninja
                     file.print("build {}.o: compile_pcm {}.pcm\n", mname, mname);
                     if (!target.cxxflags.empty() or !target.cflags.empty())
                     {
-                        file.print("  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
+                        file.print("  cxxflags = {} {}\n",
+                                   fmt::join(toolchain.cxxflags, " "),
+                                   fmt::join(target.cxxflags, " "));
                     }
                 }
             }
@@ -171,9 +170,10 @@ export namespace cppbuild::ninja
                                    src.stem().string(),
                                    src.string(),
                                    order_only);
-                        if (!target.cflags.empty() or !cflags.empty())
+                        if (!target.cflags.empty() or !toolchain.cflags.empty())
                         {
-                            file.print("  cflags = {} {}\n", fmt::join(cflags, " "), fmt::join(target.cflags, " "));
+                            file.print(
+                                "  cflags = {} {}\n", fmt::join(toolchain.cflags, " "), fmt::join(target.cflags, " "));
                         }
                     }
                     else
@@ -182,10 +182,11 @@ export namespace cppbuild::ninja
                                    src.stem().string(),
                                    src.string(),
                                    order_only);
-                        if (!target.cxxflags.empty() or !cxxflags.empty())
+                        if (!target.cxxflags.empty() or !toolchain.cxxflags.empty())
                         {
-                            file.print(
-                                "  cxxflags = {} {}\n", fmt::join(cxxflags, " "), fmt::join(target.cxxflags, " "));
+                            file.print("  cxxflags = {} {}\n",
+                                       fmt::join(toolchain.cxxflags, " "),
+                                       fmt::join(target.cxxflags, " "));
                         }
                         if (!header_unit_deps.empty())
                         {
@@ -197,12 +198,10 @@ export namespace cppbuild::ninja
         }
         file.print("\n");
     }
-
-    auto write_phase_link(fmt::ostream &file,
-                          const graaf::directed_graph<cppbuild::types::target, int> &graph,
-                          const std::vector<graaf::vertex_id_t> &order,
-                          const std::vector<std::string_view> &exe_ldflags,
-                          const std::vector<std::string_view> &shared_ldflags) -> void
+    auto write_ninja_build_link_edges(fmt::ostream &file,
+                                      const graaf::directed_graph<cppbuild::types::target, int> &graph,
+                                      const std::vector<graaf::vertex_id_t> &order,
+                                      const types::toolchain &toolchain) -> void
     {
         for (auto id : order)
         {
@@ -222,18 +221,20 @@ export namespace cppbuild::ninja
             if (target.type == "exe")
             {
                 file.print("build {}.elf: link{}\n", target.name, objs);
-                if (!target.ldflags.empty() or !exe_ldflags.empty())
+                if (!target.ldflags.empty() or !toolchain.exe_ldflags.empty())
                 {
-                    file.print("  ldflags = {} {}\n", fmt::join(exe_ldflags, " "), fmt::join(target.ldflags, " "));
+                    file.print(
+                        "  ldflags = {} {}\n", fmt::join(toolchain.exe_ldflags, " "), fmt::join(target.ldflags, " "));
                 }
             }
             else if (target.type == "shared")
             {
                 file.print("build lib{}.so: link{}\n", target.name, objs);
-                if (!shared_ldflags.empty() or !target.ldflags.empty())
+                if (!toolchain.shared_ldflags.empty() or !target.ldflags.empty())
                 {
-                    file.print(
-                        "  ldflags = {} {} -shared \n", fmt::join(shared_ldflags, " "), fmt::join(target.ldflags, " "));
+                    file.print("  ldflags = {} {} -shared \n",
+                               fmt::join(toolchain.shared_ldflags, " "),
+                               fmt::join(target.ldflags, " "));
                 }
             }
             else if (target.type == "static")
@@ -242,29 +243,21 @@ export namespace cppbuild::ninja
             }
         }
     }
-
     struct write_ninja_options
     {
         public:
             const graaf::directed_graph<cppbuild::types::target, int> &graph;
             const std::vector<graaf::vertex_id_t> &order;
-            const std::string_view cxx_compiler;
-            const std::string_view c_compiler;
-            const std::string_view archiver;
-            const std::vector<std::string_view> cxxflags;
-            const std::vector<std::string_view> cflags;
-            const std::vector<std::string_view> exe_ldflags;
-            const std::vector<std::string_view> shared_ldflags;
+            const types::toolchain &toolchain;
             const std::filesystem::path &build_dir;
             const std::filesystem::path &self_path;
     };
-
-    auto write_ninja(write_ninja_options opts) -> void
+    auto write_ninja(const write_ninja_options &opts) -> void
     {
         fmt::ostream file{fmt::output_file((opts.build_dir / "build.ninja").string())};
-        write_ninja_rules(file, opts.cxx_compiler, opts.c_compiler, opts.archiver, opts.self_path);
-        write_phase_precompile(file, opts.graph, opts.order, opts.cxxflags);
-        write_phase_codegen(file, opts.graph, opts.order, opts.cxxflags, opts.cflags);
-        write_phase_link(file, opts.graph, opts.order, opts.exe_ldflags, opts.shared_ldflags);
+        write_ninja_build_rules(file, opts.toolchain, opts.self_path);
+        write_ninja_build_precompile_edges(file, opts.graph, opts.order, opts.toolchain);
+        write_ninja_build_codegen_edges(file, opts.graph, opts.order, opts.toolchain);
+        write_ninja_build_link_edges(file, opts.graph, opts.order, opts.toolchain);
     }
 } // namespace cppbuild::ninja

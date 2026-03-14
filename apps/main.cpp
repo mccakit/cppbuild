@@ -9,11 +9,10 @@ import cppbuild.types;
 import cppbuild.compdb;
 import cppbuild.ninja;
 import cppbuild.toolchain;
-import cppbuild.scanner;
 import cppbuild.helpers;
 import cppbuild.cache;
 import cppbuild.core;
-import cppbuild.configure;
+import cppbuild.app;
 
 auto main(int argc, char **argv) -> int
 {
@@ -29,22 +28,22 @@ auto main(int argc, char **argv) -> int
     std::string mode = result["mode"].as<std::string>();
     if (mode == "configure")
     {
-        return configure::conf({.src_dir = result["src_dir"].as<std::string>(),
+        return app::configure({.src_dir = result["src_dir"].as<std::string>(),
                                 .build_dir = result["build_dir"].as<std::string>(),
                                 .toolchain_path = result["toolchain"].as<std::string>(),
                                 .self_path = self_path});
     }
     else if (mode == "scan")
     {
-        scanner::write_dyndep(result["compdb_path"].as<std::string>());
+        app::generate_dyndep(result["compdb_path"].as<std::string>());
     }
     else if (mode == "reconfigure")
     {
-        return configure::reconf({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path});
+        return app::reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path});
     }
     else if (mode == "build")
     {
-        if (configure::reconf({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path}) != 0)
+        if (app::reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path}) != 0)
         {
             return 1;
         }

@@ -116,7 +116,7 @@ export namespace cppbuild::umka
                     fmt::println("run error: {}", umkaGetError(umka_c)->msg);
                     std::terminate();
                 }
-                UmkaFuncContext umka_fn{0};
+                UmkaFuncContext umka_fn{};
                 umkaGetFunc(umka_c, nullptr, func_name, &umka_fn);
                 cresult result_storage{};
                 UmkaStackSlot result_slot{};
