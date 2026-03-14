@@ -1,13 +1,6 @@
-#include <cstdlib>
-#include <vector>
-#include <optional>
 #include <fmt/base.h>
 #include <fmt/os.h>
 #include <fmt/ranges.h>
-#include "graaflib/graph.h"
-#include "graaflib/algorithm/topological_sorting/dfs_topological_sorting.h" // Don't touch
-#include <simdjson.h>
-#include <umka_api.h>
 #include "cxxopts.hpp"
 
 import std;
