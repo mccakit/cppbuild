@@ -29,28 +29,26 @@ auto main(int argc, char **argv) -> int
     std::string mode = result["mode"].as<std::string>();
     if (mode == "configure")
     {
-        return cppbuild::configure::conf(
-            result["src_dir"].as<std::string>(),
-            result["build_dir"].as<std::string>(),
-            result["toolchain"].as<std::string>(),
-            self_path);
+        return configure::conf({.src_dir = result["src_dir"].as<std::string>(),
+                                .build_dir = result["build_dir"].as<std::string>(),
+                                .toolchain_path = result["toolchain"].as<std::string>(),
+                                .self_path = self_path});
     }
     else if (mode == "scan")
     {
-        cppbuild::scanner::write_dyndep(result["compdb_path"].as<std::string>());
+        scanner::write_dyndep(result["compdb_path"].as<std::string>());
     }
     else if (mode == "reconfigure")
     {
-        return cppbuild::configure::reconf(result["build_dir"].as<std::string>(), self_path);
+        return configure::reconf({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path});
     }
     else if (mode == "build")
     {
-        std::string build_dir = result["build_dir"].as<std::string>();
-        if (cppbuild::configure::reconf(build_dir, self_path) != 0)
+        if (configure::reconf({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path}) != 0)
         {
             return 1;
         }
-        return std::system(fmt::format("ninja -C {}", build_dir).c_str());
+        return std::system(fmt::format("ninja -C {}", result["build_dir"].as<std::string>()).c_str());
     }
     return 0;
 }
