@@ -72,10 +72,10 @@ export namespace cppbuild::cache
     {
         simdjson::dom::parser parser;
         auto doc = parser.load(path.string());
-        std::vector<umka::cxxtarget> targets;
+        umka::umka_cxx_result cxx_result;
         for (auto t : doc["targets"])
         {
-            umka::cxxtarget ct;
+            umka::umka_cxx_build_target ct;
             ct.name = std::string(t["name"].get_string().value());
             ct.type = std::string(t["type"].get_string().value());
             for (auto src : t["srcs"].get_array().value())
@@ -86,9 +86,9 @@ export namespace cppbuild::cache
             {
                 ct.deps.push_back(std::string(dep.get_string().value()));
             }
-            targets.push_back(std::move(ct));
+            cxx_result.build_targets.push_back(std::move(ct));
         }
-        return core::build_graph(targets, src_dir);
+        return core::build_graph(cxx_result, src_dir);
     }
 
     auto load_cache(const std::filesystem::path &path) -> types::cache_result
@@ -118,7 +118,6 @@ export namespace cppbuild::cache
         {
             tc.archiver = std::string(val.get_string().value());
         }
-
         simdjson::dom::array arr;
         if (tc_doc["cxxflags"].get(arr) == simdjson::SUCCESS)
         {
@@ -148,11 +147,10 @@ export namespace cppbuild::cache
                 tc.shared_ldflags.push_back(std::string(f.get_string().value()));
             }
         }
-
-        std::vector<umka::cxxtarget> targets;
+        umka::umka_cxx_result cxx_result;
         for (auto t : doc["targets"])
         {
-            umka::cxxtarget ct{};
+            umka::umka_cxx_build_target ct{};
             ct.name = std::string(t["name"].get_string().value());
             ct.type = std::string(t["type"].get_string().value());
             for (auto src : t["srcs"].get_array().value())
@@ -163,11 +161,10 @@ export namespace cppbuild::cache
             {
                 ct.deps.push_back(std::string(dep.get_string().value()));
             }
-            targets.push_back(std::move(ct));
+            cxx_result.build_targets.push_back(std::move(ct));
         }
-
         result.toolchain = tc;
-        result.graph = core::build_graph(targets, "");
+        result.graph = core::build_graph(cxx_result, "");
         return result;
     }
-}
+} // namespace cppbuild::cache

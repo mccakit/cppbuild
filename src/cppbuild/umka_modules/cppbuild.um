@@ -18,6 +18,12 @@ type phony_target* = struct {
     ldflags:       []str;
 }
 
+type install_target* = struct {
+    src: str;
+    dst: str;
+}
+
+var install_targets*: []install_target
 var build_targets*: []build_target
 var phony_targets*: []phony_target
 var active_idx*:    int = -1 // Index of the target currently being configured
@@ -55,6 +61,10 @@ fn add_sources*(type_: str, srcs: []str) {
     })
 
     t.deps = append(t.deps, step_name)
+}
+
+fn install*(src, dst: str) {
+    install_targets = append(install_targets, install_target{src: src, dst: dst})
 }
 
 fn add_cxxflags*(flags: []str) {

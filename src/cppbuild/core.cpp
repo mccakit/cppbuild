@@ -16,11 +16,11 @@ import cppbuild.umka;
 export namespace cppbuild::core
 {
     using namespace cppbuild;
-    auto build_graph(const std::vector<umka::cxxtarget> &targets, const std::filesystem::path &src_dir) -> types::graph_result
+    auto build_graph(const umka::umka_cxx_result &umka_result, const std::filesystem::path &src_dir) -> types::graph_result
     {
-        graaf::directed_graph<cppbuild::types::target, int> graph;
+        graaf::directed_graph<types::target, int> graph;
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
-        for (auto &ut : targets)
+        for (auto &ut : umka_result.build_targets)
         {
             cppbuild::types::target target;
             target.name = ut.name;
@@ -35,7 +35,7 @@ export namespace cppbuild::core
             }
             name_to_id[ut.name] = graph.add_vertex(std::move(target));
         }
-        for (auto &ut : targets)
+        for (auto &ut : umka_result.build_targets)
         {
             for (auto &dep : ut.deps)
             {
