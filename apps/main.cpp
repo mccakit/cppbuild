@@ -7,7 +7,6 @@
 #include "graaflib/graph.h"
 #include "graaflib/algorithm/topological_sorting/dfs_topological_sorting.h" // Don't touch
 #include <simdjson.h>
-#include <string_view>
 #include <umka_api.h>
 #include "cxxopts.hpp"
 
