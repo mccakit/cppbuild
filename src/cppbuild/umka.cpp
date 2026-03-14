@@ -3,13 +3,13 @@ module;
 #include <fmt/base.h>
 #include <fmt/os.h>
 #include <fmt/ranges.h>
-export module umka_cxx;
+export module cppbuild.umka;
 import std;
-export namespace umka_cxx
+export namespace cppbuild::umka
 {
 
     constexpr char cppbuild_mod[] = {
-#embed "cppbuild.um"
+#embed "umka_modules/cppbuild.um"
         , 0};
     struct cstr_arr
     {
@@ -135,4 +135,4 @@ export namespace umka_cxx
                 return targets;
             }
     };
-} // namespace umka_cxx
+} // namespace cppbuild::umka
