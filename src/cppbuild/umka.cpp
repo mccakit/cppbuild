@@ -86,6 +86,16 @@ export namespace cppbuild::umka
                 }
             }
     };
+    auto to_cxxtargets(cresult *result, int len) -> std::vector<cxxtarget>
+    {
+        std::vector<cxxtarget> targets;
+        targets.reserve(len);
+        for (int i = 0; i < len; i++)
+        {
+            targets.emplace_back(&result->data[i]);
+        }
+        return targets;
+    }
 
     class umka
     {
@@ -114,23 +124,18 @@ export namespace cppbuild::umka
                 umka_fn.result = &result_slot;
                 umkaCall(umka_c, &umka_fn);
 
-                auto *header = (cresult *)(result_slot.ptrVal);
-                int len = umkaGetDynArrayLen(header);
-                std::vector<cxxtarget> targets;
-                targets.reserve(len);
+                auto *result = (cresult *)(result_slot.ptrVal);
+                int len = umkaGetDynArrayLen(result);
+                std::vector<cxxtarget> targets{to_cxxtargets(result, len)};
                 for (int i = 0; i < len; i++)
                 {
-                    targets.emplace_back(&header->data[i]);
+                    umkaDecRef(umka_c, result->data[i].srcs.data);
+                    umkaDecRef(umka_c, result->data[i].deps.data);
+                    umkaDecRef(umka_c, result->data[i].cxxflags.data);
+                    umkaDecRef(umka_c, result->data[i].cflags.data);
+                    umkaDecRef(umka_c, result->data[i].ldflags.data);
                 }
-                for (int i = 0; i < len; i++)
-                {
-                    umkaDecRef(umka_c, header->data[i].srcs.data);
-                    umkaDecRef(umka_c, header->data[i].deps.data);
-                    umkaDecRef(umka_c, header->data[i].cxxflags.data);
-                    umkaDecRef(umka_c, header->data[i].cflags.data);
-                    umkaDecRef(umka_c, header->data[i].ldflags.data);
-                }
-                umkaDecRef(umka_c, header->data);
+                umkaDecRef(umka_c, result->data);
                 umkaFree(umka_c);
                 return targets;
             }
