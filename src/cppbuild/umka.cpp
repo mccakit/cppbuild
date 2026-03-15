@@ -65,7 +65,7 @@ export namespace cppbuild::umka
     {
         public:
             std::string name{};
-            std::vector<std::string> srcs{};
+            std::vector<std::filesystem::path> srcs{};
             std::string type{};
             std::vector<std::string> deps{};
             std::vector<std::string> cxxflags{};
@@ -87,15 +87,25 @@ export namespace cppbuild::umka
                 cflags.reserve(cflags_len);
                 ldflags.reserve(ldflags_len);
                 for (int j = 0; j < src_len; j++)
+                {
                     srcs.push_back(target->srcs.data[j]);
+                }
                 for (int j = 0; j < dep_len; j++)
+                {
                     deps.push_back(target->deps.data[j]);
+                }
                 for (int j = 0; j < cxxflags_len; j++)
+                {
                     cxxflags.push_back(target->cxxflags.data[j]);
+                }
                 for (int j = 0; j < cflags_len; j++)
+                {
                     cflags.push_back(target->cflags.data[j]);
+                }
                 for (int j = 0; j < ldflags_len; j++)
+                {
                     ldflags.push_back(target->ldflags.data[j]);
+                }
             }
     };
 
@@ -105,7 +115,9 @@ export namespace cppbuild::umka
             std::filesystem::path src{};
             std::filesystem::path dst{};
             umka_cxx_install_target() = default;
-            umka_cxx_install_target(umka_install_target *target) : src(target->src), dst(target->dst) {}
+            umka_cxx_install_target(umka_install_target *target) : src(target->src), dst(target->dst)
+            {
+            }
     };
 
     struct umka_cxx_result
@@ -120,10 +132,14 @@ export namespace cppbuild::umka
                 int install_len = umkaGetDynArrayLen(&result->install_targets);
                 r.build_targets.reserve(build_len);
                 for (int i = 0; i < build_len; i++)
+                {
                     r.build_targets.emplace_back(&result->build_targets.data[i]);
+                }
                 r.install_targets.reserve(install_len);
                 for (int i = 0; i < install_len; i++)
+                {
                     r.install_targets.emplace_back(&result->install_targets.data[i]);
+                }
                 return r;
             }
     };

@@ -160,7 +160,7 @@ export namespace cppbuild::app
             fmt::println("Reconfigure failed");
             return 1;
         }
-        cppbuild::ninja::write_ninja_build({.graph = graph,
+        ninja::write_ninja_build({.graph = graph,
                                             .order = *order,
                                             .toolchain = cache.toolchain,
                                             .build_dir = opts.build_dir,

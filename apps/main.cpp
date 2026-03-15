@@ -30,10 +30,10 @@ auto main(int argc, char **argv) -> int
     if (mode == "configure")
     {
         return app::configure({.src_dir = result["src_dir"].as<std::string>(),
-                                .build_dir = result["build_dir"].as<std::string>(),
-                                .toolchain_path = result["toolchain"].as<std::string>(),
-                                .prefix = std::filesystem::weakly_canonical(result["prefix"].as<std::string>()),
-                                .self_path = self_path});
+                               .build_dir = result["build_dir"].as<std::string>(),
+                               .toolchain_path = result["toolchain"].as<std::string>(),
+                               .self_path = self_path,
+                               .prefix = std::filesystem::weakly_canonical(result["prefix"].as<std::string>())});
     }
     else if (mode == "scan")
     {
