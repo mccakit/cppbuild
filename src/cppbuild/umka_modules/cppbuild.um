@@ -38,7 +38,7 @@ type install_options* = struct {
     targets: []install_target_group;
     sources: []install_source_group;
 }
-var cppbuild_result*: result
+var build_config*: result
 fn target*(opts: target_options) {
     for _, sg in opts.sources {
         step_name := opts.name + "_" + sg.kind
@@ -46,7 +46,7 @@ fn target*(opts: target_options) {
         for _, dep in opts.deps {
             filtered_deps = append(filtered_deps, dep)
         }
-        cppbuild_result.build_targets = append(cppbuild_result.build_targets, build_target{
+        build_config.build_targets = append(build_config.build_targets, build_target{
             name:  step_name,
             kind:  sg.kind,
             deps:  filtered_deps,
@@ -55,7 +55,7 @@ fn target*(opts: target_options) {
         opts.deps = append(opts.deps, step_name)
     }
     if opts.kind == "exe" || opts.kind == "shared" || opts.kind == "static" {
-        cppbuild_result.build_targets = append(cppbuild_result.build_targets, build_target{
+        build_config.build_targets = append(build_config.build_targets, build_target{
             name:  opts.name,
             kind:  opts.kind,
             deps:  opts.deps,
@@ -66,14 +66,14 @@ fn target*(opts: target_options) {
 fn install*(opts: install_options) {
     for _, tg in opts.targets {
         for _, name in tg.targets {
-            for _, t in cppbuild_result.build_targets {
+            for _, t in build_config.build_targets {
                 if t.name == name {
                     if t.kind == "exe" {
-                        cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: name + ".elf", install_dir: tg.dir, is_artifact: true})
+                        build_config.install_targets = append(build_config.install_targets, install_target{file: name + ".elf", install_dir: tg.dir, is_artifact: true})
                     } else if t.kind == "shared" {
-                        cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: "lib" + name + ".so", install_dir: tg.dir, is_artifact: true})
+                        build_config.install_targets = append(build_config.install_targets, install_target{file: "lib" + name + ".so", install_dir: tg.dir, is_artifact: true})
                     } else if t.kind == "static" {
-                        cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: "lib" + name + ".a", install_dir: tg.dir, is_artifact: true})
+                        build_config.install_targets = append(build_config.install_targets, install_target{file: "lib" + name + ".a", install_dir: tg.dir, is_artifact: true})
                     }
                     break
                 }
@@ -82,7 +82,7 @@ fn install*(opts: install_options) {
     }
     for _, sg in opts.sources {
         for _, file in sg.files {
-            cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: file, install_dir: sg.dir, is_artifact: false})
+            build_config.install_targets = append(build_config.install_targets, install_target{file: file, install_dir: sg.dir, is_artifact: false})
         }
     }
 }
