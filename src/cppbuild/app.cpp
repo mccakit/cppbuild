@@ -115,6 +115,10 @@ export namespace cppbuild::app
         types::toolchain tc{};
         umka::umka umka{};
         auto targets = umka.run((opts.src_dir / "build.um").string(), "configure");
+        for (auto &t : targets.install_targets)
+        {
+            t.src = std::filesystem::weakly_canonical(opts.src_dir / t.src);
+        }
         types::graph_result res{core::build_graph(targets, opts.src_dir)};
         graaf::directed_graph<types::target, int> graph{std::move(res.g)};
         toolchain::parse_toolchain(opts.toolchain_path, tc);
@@ -133,14 +137,15 @@ export namespace cppbuild::app
                                   .toolchain = tc,
                                   .build_dir = opts.build_dir,
                                   .self_path = opts.self_path});
-        cache::save_cache(tc, graph, opts.build_dir);
         compdb::write_compile_commands({.graph = graph,
                                         .cxx_compiler = tc.cxx_compiler,
                                         .c_compiler = tc.c_compiler,
                                         .cxxflags = helpers::to_views(tc.cxxflags),
                                         .cflags = helpers::to_views(tc.cflags),
                                         .output_dir = opts.build_dir});
-        ninja::write_ninja_install({.install_targets = targets.install_targets, .build_dir = opts.build_dir, .src_dir = opts.src_dir, .prefix = opts.prefix});
+        ninja::write_ninja_install(
+            {.install_targets = targets.install_targets, .build_dir = opts.build_dir, .prefix = opts.prefix});
+        cache::save_cache(tc, graph, opts.build_dir);
         return 0;
     }
     struct reconfigure_options
@@ -161,10 +166,10 @@ export namespace cppbuild::app
             return 1;
         }
         ninja::write_ninja_build({.graph = graph,
-                                            .order = *order,
-                                            .toolchain = cache.toolchain,
-                                            .build_dir = opts.build_dir,
-                                            .self_path = opts.self_path});
+                                  .order = *order,
+                                  .toolchain = cache.toolchain,
+                                  .build_dir = opts.build_dir,
+                                  .self_path = opts.self_path});
         std::filesystem::remove(opts.build_dir / "modules.dd");
         return 0;
     }

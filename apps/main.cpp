@@ -53,7 +53,7 @@ auto main(int argc, char **argv) -> int
     }
     else if (mode == "install")
     {
-        return std::system(fmt::format("ninja -f {}/install.ninja", result["build_dir"].as<std::string>()).c_str());
+        return std::system(fmt::format("ninja -C {} -f install.ninja", result["build_dir"].as<std::string>()).c_str());
     }
     return 0;
 }

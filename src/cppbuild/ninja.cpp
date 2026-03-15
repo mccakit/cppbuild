@@ -266,7 +266,6 @@ export namespace cppbuild::ninja
         public:
             const std::vector<umka::umka_cxx_install_target> &install_targets;
             const std::filesystem::path &build_dir;
-            const std::filesystem::path &src_dir;
             const std::filesystem::path &prefix;
     };
 
@@ -278,9 +277,8 @@ export namespace cppbuild::ninja
         file.print("  description = INSTALL $out\n\n");
         for (const auto &t : opts.install_targets)
         {
-            const auto src = std::filesystem::weakly_canonical(opts.src_dir / t.src);
             const auto dst = std::filesystem::weakly_canonical(opts.prefix / t.dst / t.src.filename());
-            file.print("build {}: cp {}\n", dst.string(), src.string());
+            file.print("build {}: cp {}\n", dst.string(), t.src.string());
         }
     }
 } // namespace cppbuild::ninja
