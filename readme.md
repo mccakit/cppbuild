@@ -16,6 +16,36 @@ Configure and build:
 cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=... && cmake --build build && cmake --install build
 ```
 
+## Example
+```umka
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::result {
+    cppbuild::target({
+        name:  "target0",
+        kind:  "exe",
+        sources: {
+            {kind: "named_module",     files: {"m4.c++", "m3.cppm", "m2.cc", "m1.cpp"}},
+            {kind: "translation_unit", files: {"app0.cpp"}}
+        }
+    })
+    cppbuild::target({
+        name:  "myshared",
+        kind:  "shared",
+        sources: {
+            {kind: "translation_unit", files: {"lib0.cpp"}}
+        }
+    })
+    cppbuild::install({
+        targets: {{dir: "lib",     targets: {"myshared"}}},
+        sources: {{dir: "include", files:   {"h1.hpp"}}}
+    })
+    return cppbuild::build_config
+}
+```
+
 ## Usage
 ```sh
 cd examples/ex0
