@@ -115,6 +115,13 @@ export namespace cppbuild::app
         types::toolchain tc{};
         umka::umka umka{};
         auto targets = umka.run((opts.src_dir / "build.um").string(), "configure");
+        for (auto &t : targets.build_targets)
+        {
+            for (auto &src : t.srcs)
+            {
+                src = std::filesystem::weakly_canonical(opts.src_dir / src);
+            }
+        }
         for (auto &t : targets.install_targets)
         {
             t.src = std::filesystem::weakly_canonical(opts.src_dir / t.src);

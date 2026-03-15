@@ -29,10 +29,7 @@ export namespace cppbuild::core
             target.cxxflags = ut.cxxflags;
             target.cflags = ut.cflags;
             target.ldflags = ut.ldflags;
-            for (auto &src : ut.srcs)
-            {
-                target.srcs.push_back(std::filesystem::weakly_canonical(src_dir / src));
-            }
+            target.srcs = ut.srcs;
             name_to_id[ut.name] = graph.add_vertex(std::move(target));
         }
         for (auto &ut : umka_result.build_targets)
