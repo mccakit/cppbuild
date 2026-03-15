@@ -34,9 +34,9 @@ export namespace cppbuild::umka
     struct umka_install_target
     {
         public:
-            const char *file;
+            umka_str_arr files;
             const char *install_dir;
-            const bool is_artifact;
+            bool is_artifact;
     };
 
     struct umka_build_result
@@ -113,11 +113,19 @@ export namespace cppbuild::umka
     class umka_cxx_install_target
     {
         public:
-            std::filesystem::path file{};
+            std::vector<std::filesystem::path> files{};
             std::filesystem::path install_dir{};
-            const bool is_artifact{false};
+            bool is_artifact{false};
             umka_cxx_install_target() = default;
-            umka_cxx_install_target(umka_install_target *target) : file(target->file), install_dir(target->install_dir), is_artifact(target->is_artifact) {}
+            umka_cxx_install_target(umka_install_target *target) : install_dir(target->install_dir), is_artifact(target->is_artifact)
+            {
+                int len = umkaGetDynArrayLen(&target->files);
+                files.reserve(len);
+                for (int j = 0; j < len; j++)
+                {
+                    files.push_back(target->files.data[j]);
+                }
+            }
     };
 
     struct umka_cxx_result
@@ -182,6 +190,11 @@ export namespace cppbuild::umka
                     umkaDecRef(umka_c, result->build_targets.data[i].ldflags.data);
                 }
                 umkaDecRef(umka_c, result->build_targets.data);
+                int install_len = umkaGetDynArrayLen(&result->install_targets);
+                for (int i = 0; i < install_len; i++)
+                {
+                    umkaDecRef(umka_c, result->install_targets.data[i].files.data);
+                }
                 umkaDecRef(umka_c, result->install_targets.data);
                 umkaFree(umka_c);
                 return cxx_result;

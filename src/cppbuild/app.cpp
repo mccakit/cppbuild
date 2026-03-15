@@ -102,8 +102,8 @@ export namespace cppbuild::app
         return scan_output;
     }
     auto resolve_file_paths(umka::umka_cxx_result &result,
-                           const std::filesystem::path &src_dir,
-                           const std::filesystem::path &build_dir) -> void
+                            const std::filesystem::path &src_dir,
+                            const std::filesystem::path &build_dir) -> void
     {
         for (auto &build_target : result.build_targets)
         {
@@ -114,13 +114,10 @@ export namespace cppbuild::app
         }
         for (auto &install_target : result.install_targets)
         {
-            if (install_target.is_artifact)
+            const auto &base = install_target.is_artifact ? build_dir : src_dir;
+            for (auto &file : install_target.files)
             {
-                install_target.file = std::filesystem::weakly_canonical(build_dir / install_target.file);
-            }
-            else
-            {
-                install_target.file = std::filesystem::weakly_canonical(src_dir / install_target.file);
+                file = std::filesystem::weakly_canonical(base / file);
             }
         }
     }

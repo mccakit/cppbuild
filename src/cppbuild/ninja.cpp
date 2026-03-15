@@ -277,8 +277,11 @@ export namespace cppbuild::ninja
         file.print("  description = INSTALL $out\n\n");
         for (const auto &t : opts.install_targets)
         {
-            const auto dst = std::filesystem::weakly_canonical(opts.prefix / t.install_dir / t.file.filename());
-            file.print("build {}: cp {}\n", dst.string(), t.file.string());
+            for (const auto &f : t.files)
+            {
+                const auto dst = std::filesystem::weakly_canonical(opts.prefix / t.install_dir / f.filename());
+                file.print("build {}: cp {}\n", dst.string(), f.string());
+            }
         }
     }
 } // namespace cppbuild::ninja

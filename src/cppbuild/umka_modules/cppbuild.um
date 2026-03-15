@@ -8,7 +8,7 @@ type build_target* = struct {
     ldflags:  []str;
 }
 type install_target* = struct {
-    file:        str;
+    files:       []str;
     install_dir: str;
     is_artifact: bool;
 }
@@ -65,24 +65,24 @@ fn target*(opts: target_options) {
 }
 fn install*(opts: install_options) {
     for _, tg in opts.targets {
+        var artifact_files: []str
         for _, name in tg.targets {
             for _, t in build_config.build_targets {
                 if t.name == name {
                     if t.kind == "exe" {
-                        build_config.install_targets = append(build_config.install_targets, install_target{file: name + ".elf", install_dir: tg.dir, is_artifact: true})
+                        artifact_files = append(artifact_files, name + ".elf")
                     } else if t.kind == "shared" {
-                        build_config.install_targets = append(build_config.install_targets, install_target{file: "lib" + name + ".so", install_dir: tg.dir, is_artifact: true})
+                        artifact_files = append(artifact_files, "lib" + name + ".so")
                     } else if t.kind == "static" {
-                        build_config.install_targets = append(build_config.install_targets, install_target{file: "lib" + name + ".a", install_dir: tg.dir, is_artifact: true})
+                        artifact_files = append(artifact_files, "lib" + name + ".a")
                     }
                     break
                 }
             }
         }
+        build_config.install_targets = append(build_config.install_targets, install_target{files: artifact_files, install_dir: tg.dir, is_artifact: true})
     }
     for _, sg in opts.sources {
-        for _, file in sg.files {
-            build_config.install_targets = append(build_config.install_targets, install_target{file: file, install_dir: sg.dir, is_artifact: false})
-        }
+        build_config.install_targets = append(build_config.install_targets, install_target{files: sg.files, install_dir: sg.dir, is_artifact: false})
     }
 }
