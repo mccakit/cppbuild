@@ -10,6 +10,7 @@ export module cppbuild.ninja;
 import std;
 import cppbuild.types;
 import cppbuild.helpers;
+import cppbuild.umka;
 export namespace cppbuild::ninja
 {
     using namespace cppbuild;
@@ -252,12 +253,34 @@ export namespace cppbuild::ninja
             const std::filesystem::path &build_dir;
             const std::filesystem::path &self_path;
     };
-    auto write_ninja(const write_ninja_options &opts) -> void
+    auto write_ninja_build(const write_ninja_options &opts) -> void
     {
         fmt::ostream file{fmt::output_file((opts.build_dir / "build.ninja").string())};
         write_ninja_build_rules(file, opts.toolchain, opts.self_path);
         write_ninja_build_precompile_edges(file, opts.graph, opts.order, opts.toolchain);
         write_ninja_build_codegen_edges(file, opts.graph, opts.order, opts.toolchain);
         write_ninja_build_link_edges(file, opts.graph, opts.order, opts.toolchain);
+    }
+    struct write_ninja_install_options
+    {
+        public:
+            const std::vector<umka::umka_cxx_install_target> &install_targets;
+            const std::filesystem::path &build_dir;
+            const std::filesystem::path &src_dir;
+            const std::filesystem::path &prefix;
+    };
+
+    auto write_ninja_install(const write_ninja_install_options &opts) -> void
+    {
+        fmt::ostream file{fmt::output_file((opts.build_dir / "install.ninja").string())};
+        file.print("rule cp\n");
+        file.print("  command = cp $in $out\n");
+        file.print("  description = INSTALL $out\n\n");
+        for (const auto &t : opts.install_targets)
+        {
+            const auto src = std::filesystem::weakly_canonical(opts.src_dir / t.src);
+            const auto dst = std::filesystem::weakly_canonical(opts.prefix / t.dst / t.src.filename());
+            file.print("build {}: cp {}\n", dst.string(), src.string());
+        }
     }
 } // namespace cppbuild::ninja

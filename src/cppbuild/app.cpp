@@ -108,6 +108,7 @@ export namespace cppbuild::app
             const std::filesystem::path &build_dir;
             const std::filesystem::path &toolchain_path;
             const std::filesystem::path &self_path;
+            const std::filesystem::path &prefix;
     };
     auto configure(const configure_options &opts) -> int
     {
@@ -127,11 +128,11 @@ export namespace cppbuild::app
         {
             return 1;
         }
-        ninja::write_ninja({.graph = graph,
-                            .order = *order,
-                            .toolchain = tc,
-                            .build_dir = opts.build_dir,
-                            .self_path = opts.self_path});
+        ninja::write_ninja_build({.graph = graph,
+                                  .order = *order,
+                                  .toolchain = tc,
+                                  .build_dir = opts.build_dir,
+                                  .self_path = opts.self_path});
         cache::save_cache(tc, graph, opts.build_dir);
         compdb::write_compile_commands({.graph = graph,
                                         .cxx_compiler = tc.cxx_compiler,
@@ -139,6 +140,7 @@ export namespace cppbuild::app
                                         .cxxflags = helpers::to_views(tc.cxxflags),
                                         .cflags = helpers::to_views(tc.cflags),
                                         .output_dir = opts.build_dir});
+        ninja::write_ninja_install({.install_targets = targets.install_targets, .build_dir = opts.build_dir, .src_dir = opts.src_dir, .prefix = opts.prefix});
         return 0;
     }
     struct reconfigure_options
@@ -158,24 +160,12 @@ export namespace cppbuild::app
             fmt::println("Reconfigure failed");
             return 1;
         }
-        cppbuild::ninja::write_ninja({.graph = graph,
-                                      .order = *order,
-                                      .toolchain = cache.toolchain,
-                                      .build_dir = opts.build_dir,
-                                      .self_path = opts.self_path});
+        cppbuild::ninja::write_ninja_build({.graph = graph,
+                                            .order = *order,
+                                            .toolchain = cache.toolchain,
+                                            .build_dir = opts.build_dir,
+                                            .self_path = opts.self_path});
         std::filesystem::remove(opts.build_dir / "modules.dd");
-        return 0;
-    }
-
-    struct install_options
-    {
-        public:
-            const std::filesystem::path &build_dir;
-            const std::filesystem::path &prefix;
-    };
-
-    auto install(const install_options &opts) -> int
-    {
         return 0;
     }
 } // namespace cppbuild::app
