@@ -46,7 +46,7 @@ fn configure*(): cppbuild::result {
 }
 ```
 
-## Usage
+Build it:
 ```sh
 cd examples/ex0
 cppbuild --mode=configure --src_dir=. --build_dir=build --toolchain=./tc.json
