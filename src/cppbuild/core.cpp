@@ -22,9 +22,9 @@ export namespace cppbuild::core
         std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
         for (auto &ut : umka_result.build_targets)
         {
-            cppbuild::types::target target;
+            types::target target;
             target.name = ut.name;
-            target.type = ut.type;
+            target.type = ut.kind;
             target.deps = ut.deps;
             target.cxxflags = ut.cxxflags;
             target.cflags = ut.cflags;

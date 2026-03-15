@@ -23,7 +23,7 @@ export namespace cppbuild::umka
     {
         public:
             const char *name;
-            const char *type;
+            const char *kind;
             umka_str_arr srcs;
             umka_str_arr deps;
             umka_str_arr cxxflags;
@@ -36,6 +36,7 @@ export namespace cppbuild::umka
         public:
             const char *file;
             const char *install_dir;
+            const bool is_artifact;
     };
 
     struct umka_build_result
@@ -66,7 +67,7 @@ export namespace cppbuild::umka
         public:
             std::string name{};
             std::vector<std::filesystem::path> srcs{};
-            std::string type{};
+            std::string kind{};
             std::vector<std::string> deps{};
             std::vector<std::string> cxxflags{};
             std::vector<std::string> cflags{};
@@ -74,7 +75,7 @@ export namespace cppbuild::umka
             umka_cxx_build_target() = default;
             umka_cxx_build_target(umka_cxx_build_target &&) = default;
             umka_cxx_build_target &operator=(umka_cxx_build_target &&) = default;
-            umka_cxx_build_target(umka_build_target *target) : name(target->name), type(target->type)
+            umka_cxx_build_target(umka_build_target *target) : name(target->name), kind(target->kind)
             {
                 int src_len{umkaGetDynArrayLen(&target->srcs)};
                 int dep_len{umkaGetDynArrayLen(&target->deps)};
@@ -114,8 +115,9 @@ export namespace cppbuild::umka
         public:
             std::filesystem::path file{};
             std::filesystem::path install_dir{};
+            const bool is_artifact{false};
             umka_cxx_install_target() = default;
-            umka_cxx_install_target(umka_install_target *target) : file(target->file), install_dir(target->install_dir) {}
+            umka_cxx_install_target(umka_install_target *target) : file(target->file), install_dir(target->install_dir), is_artifact(target->is_artifact) {}
     };
 
     struct umka_cxx_result

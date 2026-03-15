@@ -1,84 +1,88 @@
 type build_target* = struct {
     name:     str;
-    type_:    str;
+    kind:     str;
     srcs:     []str;
     deps:     []str;
     cxxflags: []str;
     cflags:   []str;
     ldflags:  []str;
 }
-type phony_target* = struct {
-    name:          str;
-    type_:         str;
-    deps:          []str;
-    build_targets: []build_target;
-    cxxflags:      []str;
-    cflags:        []str;
-    ldflags:       []str;
-}
 type install_target* = struct {
-    file: str;
-    install_dir:  str;
+    file:        str;
+    install_dir: str;
+    is_artifact: bool;
 }
 type result* = struct {
     build_targets:   []build_target;
     install_targets: []install_target;
 }
-var cppbuild_result*: result
-var phony_targets*:   []phony_target
-var active_idx*:      int = -1
-fn target*(name, type_: str, deps: []str) {
-    phony_targets = append(phony_targets, phony_target{
-        name:  name,
-        type_: type_,
-        deps:  deps
-    })
-    active_idx = len(phony_targets) - 1
+type source_group* = struct {
+    kind:  str;
+    files: []str;
 }
-fn add_sources*(type_: str, srcs: []str) {
-    if active_idx == -1 { return }
-    t := &phony_targets[active_idx]
-    step_name := t.name + "_" + type_
-    var filtered_deps: []str
-    for _, dep in t.deps {
-        if dep != step_name {
+type target_options* = struct {
+    name:    str;
+    kind:    str;
+    deps:    []str;
+    sources: []source_group;
+}
+type install_source_group* = struct {
+    dir:   str;
+    files: []str;
+}
+type install_target_group* = struct {
+    dir:     str;
+    targets: []str;
+}
+type install_options* = struct {
+    targets: []install_target_group;
+    sources: []install_source_group;
+}
+var cppbuild_result*: result
+fn target*(opts: target_options) {
+    for _, sg in opts.sources {
+        step_name := opts.name + "_" + sg.kind
+        var filtered_deps: []str
+        for _, dep in opts.deps {
             filtered_deps = append(filtered_deps, dep)
         }
-    }
-    cppbuild_result.build_targets = append(cppbuild_result.build_targets, build_target{
-        name:     step_name,
-        type_:    type_,
-        deps:     filtered_deps,
-        srcs:     srcs,
-        cxxflags: t.cxxflags,
-        cflags:   t.cflags,
-        ldflags:  t.ldflags
-    })
-    t.deps = append(t.deps, step_name)
-}
-fn install*(file, install_dir: str) {
-    cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: file, install_dir: install_dir})
-}
-fn add_cxxflags*(flags: []str) {
-    if active_idx != -1 {
-        for _, f in flags {
-            phony_targets[active_idx].cxxflags = append(phony_targets[active_idx].cxxflags, f)
-        }
-    }
-}
-fn end*() {
-    if active_idx == -1 { return }
-    t := phony_targets[active_idx]
-    if t.type_ == "exe" || t.type_ == "shared" || t.type_ == "static" {
         cppbuild_result.build_targets = append(cppbuild_result.build_targets, build_target{
-            name:     t.name,
-            type_:    t.type_,
-            deps:     t.deps,
-            srcs:     []str{},
-            cxxflags: t.cxxflags,
-            cflags:   t.cflags,
-            ldflags:  t.ldflags
+            name:  step_name,
+            kind:  sg.kind,
+            deps:  filtered_deps,
+            srcs:  sg.files
+        })
+        opts.deps = append(opts.deps, step_name)
+    }
+    if opts.kind == "exe" || opts.kind == "shared" || opts.kind == "static" {
+        cppbuild_result.build_targets = append(cppbuild_result.build_targets, build_target{
+            name:  opts.name,
+            kind:  opts.kind,
+            deps:  opts.deps,
+            srcs:  []str{}
         })
     }
-    active_idx = -1
+}
+fn install*(opts: install_options) {
+    for _, tg in opts.targets {
+        for _, name in tg.targets {
+            for _, t in cppbuild_result.build_targets {
+                if t.name == name {
+                    if t.kind == "exe" {
+                        cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: name + ".elf", install_dir: tg.dir, is_artifact: true})
+                    } else if t.kind == "shared" {
+                        cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: "lib" + name + ".so", install_dir: tg.dir, is_artifact: true})
+                    } else if t.kind == "static" {
+                        cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: "lib" + name + ".a", install_dir: tg.dir, is_artifact: true})
+                    }
+                    break
+                }
+            }
+        }
+    }
+    for _, sg in opts.sources {
+        for _, file in sg.files {
+            cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: file, install_dir: sg.dir, is_artifact: false})
+        }
+    }
 }

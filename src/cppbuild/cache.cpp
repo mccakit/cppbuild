@@ -77,7 +77,7 @@ export namespace cppbuild::cache
         {
             umka::umka_cxx_build_target ct;
             ct.name = std::string(t["name"].get_string().value());
-            ct.type = std::string(t["type"].get_string().value());
+            ct.kind = std::string(t["type"].get_string().value());
             for (auto src : t["srcs"].get_array().value())
             {
                 ct.srcs.push_back(std::string(src.get_string().value()));
@@ -152,7 +152,7 @@ export namespace cppbuild::cache
         {
             umka::umka_cxx_build_target ct{};
             ct.name = std::string(t["name"].get_string().value());
-            ct.type = std::string(t["type"].get_string().value());
+            ct.kind = std::string(t["type"].get_string().value());
             for (auto src : t["srcs"].get_array().value())
             {
                 ct.srcs.push_back(std::string(src.get_string().value()));

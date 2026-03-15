@@ -101,7 +101,9 @@ export namespace cppbuild::app
         subprocess_destroy(&subprocess);
         return scan_output;
     }
-    auto resolve_src_paths(umka::umka_cxx_result &result, const std::filesystem::path &src_dir) -> void
+    auto resolve_file_paths(umka::umka_cxx_result &result,
+                           const std::filesystem::path &src_dir,
+                           const std::filesystem::path &build_dir) -> void
     {
         for (auto &build_target : result.build_targets)
         {
@@ -112,7 +114,14 @@ export namespace cppbuild::app
         }
         for (auto &install_target : result.install_targets)
         {
-            install_target.file = std::filesystem::weakly_canonical(src_dir / install_target.file);
+            if (install_target.is_artifact)
+            {
+                install_target.file = std::filesystem::weakly_canonical(build_dir / install_target.file);
+            }
+            else
+            {
+                install_target.file = std::filesystem::weakly_canonical(src_dir / install_target.file);
+            }
         }
     }
     struct configure_options
@@ -129,7 +138,7 @@ export namespace cppbuild::app
         types::toolchain toolchain{};
         umka::umka umka{};
         umka::umka_cxx_result result = umka.run((opts.src_dir / "build.um").string(), "configure");
-        resolve_src_paths(result, opts.src_dir);
+        resolve_file_paths(result, opts.src_dir, opts.build_dir);
         types::graph_result res{core::build_graph(result, opts.src_dir)};
         graaf::directed_graph<types::target, int> graph{std::move(res.g)};
         toolchain::parse_toolchain(opts.toolchain_path, toolchain);
