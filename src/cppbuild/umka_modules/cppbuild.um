@@ -7,7 +7,6 @@ type build_target* = struct {
     cflags:   []str;
     ldflags:  []str;
 }
-
 type phony_target* = struct {
     name:          str;
     type_:         str;
@@ -17,17 +16,17 @@ type phony_target* = struct {
     cflags:        []str;
     ldflags:       []str;
 }
-
 type install_target* = struct {
     src: str;
     dst: str;
 }
-
-var install_targets*: []install_target
-var build_targets*: []build_target
-var phony_targets*: []phony_target
-var active_idx*:    int = -1 // Index of the target currently being configured
-
+type result* = struct {
+    build_targets:   []build_target;
+    install_targets: []install_target;
+}
+var cppbuild_result*: result
+var phony_targets*:   []phony_target
+var active_idx*:      int = -1
 fn target*(name, type_: str, deps: []str) {
     phony_targets = append(phony_targets, phony_target{
         name:  name,
@@ -36,21 +35,17 @@ fn target*(name, type_: str, deps: []str) {
     })
     active_idx = len(phony_targets) - 1
 }
-
 fn add_sources*(type_: str, srcs: []str) {
     if active_idx == -1 { return }
-
     t := &phony_targets[active_idx]
     step_name := t.name + "_" + type_
-
     var filtered_deps: []str
     for _, dep in t.deps {
         if dep != step_name {
             filtered_deps = append(filtered_deps, dep)
         }
     }
-
-    build_targets = append(build_targets, build_target{
+    cppbuild_result.build_targets = append(cppbuild_result.build_targets, build_target{
         name:     step_name,
         type_:    type_,
         deps:     filtered_deps,
@@ -59,14 +54,11 @@ fn add_sources*(type_: str, srcs: []str) {
         cflags:   t.cflags,
         ldflags:  t.ldflags
     })
-
     t.deps = append(t.deps, step_name)
 }
-
 fn install*(src, dst: str) {
-    install_targets = append(install_targets, install_target{src: src, dst: dst})
+    cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{src: src, dst: dst})
 }
-
 fn add_cxxflags*(flags: []str) {
     if active_idx != -1 {
         for _, f in flags {
@@ -74,13 +66,11 @@ fn add_cxxflags*(flags: []str) {
         }
     }
 }
-
 fn end*() {
     if active_idx == -1 { return }
-
     t := phony_targets[active_idx]
     if t.type_ == "exe" || t.type_ == "shared" || t.type_ == "static" {
-        build_targets = append(build_targets, build_target{
+        cppbuild_result.build_targets = append(cppbuild_result.build_targets, build_target{
             name:     t.name,
             type_:    t.type_,
             deps:     t.deps,
@@ -90,5 +80,5 @@ fn end*() {
             ldflags:  t.ldflags
         })
     }
-    active_idx = -1 // Reset
+    active_idx = -1
 }

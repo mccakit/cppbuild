@@ -31,12 +31,34 @@ export namespace cppbuild::umka
             umka_str_arr ldflags;
     };
 
-    struct umka_result
+    struct umka_install_target
+    {
+        public:
+            const char *src;
+            const char *dst;
+    };
+
+    struct umka_build_result
     {
         public:
             const UmkaType *type;
             int64_t itemSize;
             umka_build_target *data;
+    };
+
+    struct umka_install_result
+    {
+        public:
+            const UmkaType *type;
+            int64_t itemSize;
+            umka_install_target *data;
+    };
+
+    struct umka_result
+    {
+        public:
+            umka_build_result build_targets;
+            umka_install_result install_targets;
     };
 
     class umka_cxx_build_target
@@ -77,16 +99,31 @@ export namespace cppbuild::umka
             }
     };
 
+    class umka_cxx_install_target
+    {
+        public:
+            std::filesystem::path src{};
+            std::filesystem::path dst{};
+            umka_cxx_install_target() = default;
+            umka_cxx_install_target(umka_install_target *target) : src(target->src), dst(target->dst) {}
+    };
+
     struct umka_cxx_result
     {
         public:
             std::vector<umka_cxx_build_target> build_targets;
-            static auto from(umka_result *result, int len) -> umka_cxx_result
+            std::vector<umka_cxx_install_target> install_targets;
+            static auto from(umka_result *result) -> umka_cxx_result
             {
                 umka_cxx_result r;
-                r.build_targets.reserve(len);
-                for (int i = 0; i < len; i++)
-                    r.build_targets.emplace_back(&result->data[i]);
+                int build_len = umkaGetDynArrayLen(&result->build_targets);
+                int install_len = umkaGetDynArrayLen(&result->install_targets);
+                r.build_targets.reserve(build_len);
+                for (int i = 0; i < build_len; i++)
+                    r.build_targets.emplace_back(&result->build_targets.data[i]);
+                r.install_targets.reserve(install_len);
+                for (int i = 0; i < install_len; i++)
+                    r.install_targets.emplace_back(&result->install_targets.data[i]);
                 return r;
             }
     };
@@ -118,17 +155,18 @@ export namespace cppbuild::umka
                 umka_fn.result = &result_slot;
                 umkaCall(umka_c, &umka_fn);
                 auto *result = (umka_result *)(result_slot.ptrVal);
-                int len = umkaGetDynArrayLen(result);
-                umka_cxx_result cxx_result{umka_cxx_result::from(result, len)};
-                for (int i = 0; i < len; i++)
+                umka_cxx_result cxx_result{umka_cxx_result::from(result)};
+                int build_len = umkaGetDynArrayLen(&result->build_targets);
+                for (int i = 0; i < build_len; i++)
                 {
-                    umkaDecRef(umka_c, result->data[i].srcs.data);
-                    umkaDecRef(umka_c, result->data[i].deps.data);
-                    umkaDecRef(umka_c, result->data[i].cxxflags.data);
-                    umkaDecRef(umka_c, result->data[i].cflags.data);
-                    umkaDecRef(umka_c, result->data[i].ldflags.data);
+                    umkaDecRef(umka_c, result->build_targets.data[i].srcs.data);
+                    umkaDecRef(umka_c, result->build_targets.data[i].deps.data);
+                    umkaDecRef(umka_c, result->build_targets.data[i].cxxflags.data);
+                    umkaDecRef(umka_c, result->build_targets.data[i].cflags.data);
+                    umkaDecRef(umka_c, result->build_targets.data[i].ldflags.data);
                 }
-                umkaDecRef(umka_c, result->data);
+                umkaDecRef(umka_c, result->build_targets.data);
+                umkaDecRef(umka_c, result->install_targets.data);
                 umkaFree(umka_c);
                 return cxx_result;
             }

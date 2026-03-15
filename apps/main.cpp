@@ -49,5 +49,9 @@ auto main(int argc, char **argv) -> int
         }
         return std::system(fmt::format("ninja -C {}", result["build_dir"].as<std::string>()).c_str());
     }
+    else if (mode == "install")
+    {
+        return 0;
+    }
     return 0;
 }

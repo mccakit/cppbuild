@@ -166,4 +166,16 @@ export namespace cppbuild::app
         std::filesystem::remove(opts.build_dir / "modules.dd");
         return 0;
     }
+
+    struct install_options
+    {
+        public:
+            const std::filesystem::path &build_dir;
+            const std::filesystem::path &prefix;
+    };
+
+    auto install(const install_options &opts) -> int
+    {
+        return 0;
+    }
 } // namespace cppbuild::app
