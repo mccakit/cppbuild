@@ -34,8 +34,8 @@ export namespace cppbuild::umka
     struct umka_install_target
     {
         public:
-            const char *src;
-            const char *dst;
+            const char *file;
+            const char *install_dir;
     };
 
     struct umka_build_result
@@ -112,12 +112,10 @@ export namespace cppbuild::umka
     class umka_cxx_install_target
     {
         public:
-            std::filesystem::path src{};
-            std::filesystem::path dst{};
+            std::filesystem::path file{};
+            std::filesystem::path install_dir{};
             umka_cxx_install_target() = default;
-            umka_cxx_install_target(umka_install_target *target) : src(target->src), dst(target->dst)
-            {
-            }
+            umka_cxx_install_target(umka_install_target *target) : file(target->file), install_dir(target->install_dir) {}
     };
 
     struct umka_cxx_result

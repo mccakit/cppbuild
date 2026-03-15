@@ -17,8 +17,8 @@ type phony_target* = struct {
     ldflags:       []str;
 }
 type install_target* = struct {
-    src: str;
-    dst: str;
+    file: str;
+    install_dir:  str;
 }
 type result* = struct {
     build_targets:   []build_target;
@@ -56,8 +56,8 @@ fn add_sources*(type_: str, srcs: []str) {
     })
     t.deps = append(t.deps, step_name)
 }
-fn install*(src, dst: str) {
-    cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{src: src, dst: dst})
+fn install*(file, install_dir: str) {
+    cppbuild_result.install_targets = append(cppbuild_result.install_targets, install_target{file: file, install_dir: install_dir})
 }
 fn add_cxxflags*(flags: []str) {
     if active_idx != -1 {

@@ -101,6 +101,20 @@ export namespace cppbuild::app
         subprocess_destroy(&subprocess);
         return scan_output;
     }
+    auto resolve_src_paths(umka::umka_cxx_result &result, const std::filesystem::path &src_dir) -> void
+    {
+        for (auto &build_target : result.build_targets)
+        {
+            for (auto &src : build_target.srcs)
+            {
+                src = std::filesystem::weakly_canonical(src_dir / src);
+            }
+        }
+        for (auto &install_target : result.install_targets)
+        {
+            install_target.file = std::filesystem::weakly_canonical(src_dir / install_target.file);
+        }
+    }
     struct configure_options
     {
         public:
@@ -112,28 +126,18 @@ export namespace cppbuild::app
     };
     auto configure(const configure_options &opts) -> int
     {
-        types::toolchain tc{};
+        types::toolchain toolchain{};
         umka::umka umka{};
-        auto targets = umka.run((opts.src_dir / "build.um").string(), "configure");
-        for (auto &t : targets.build_targets)
-        {
-            for (auto &src : t.srcs)
-            {
-                src = std::filesystem::weakly_canonical(opts.src_dir / src);
-            }
-        }
-        for (auto &t : targets.install_targets)
-        {
-            t.src = std::filesystem::weakly_canonical(opts.src_dir / t.src);
-        }
-        types::graph_result res{core::build_graph(targets, opts.src_dir)};
+        umka::umka_cxx_result result = umka.run((opts.src_dir / "build.um").string(), "configure");
+        resolve_src_paths(result, opts.src_dir);
+        types::graph_result res{core::build_graph(result, opts.src_dir)};
         graaf::directed_graph<types::target, int> graph{std::move(res.g)};
-        toolchain::parse_toolchain(opts.toolchain_path, tc);
+        toolchain::parse_toolchain(opts.toolchain_path, toolchain);
         compdb::write_named_module_compile_commands({.graph = graph,
-                                                     .cxx_compiler = tc.cxx_compiler,
-                                                     .cxxflags = helpers::to_views(tc.cxxflags),
+                                                     .cxx_compiler = toolchain.cxx_compiler,
+                                                     .cxxflags = helpers::to_views(toolchain.cxxflags),
                                                      .output_dir = opts.build_dir});
-        compdb::fill_module_names(graph, scan_p1689(opts.build_dir, tc));
+        compdb::fill_module_names(graph, scan_p1689(opts.build_dir, toolchain));
         const auto order = graaf::algorithm::dfs_topological_sort(graph);
         if (!order)
         {
@@ -141,18 +145,18 @@ export namespace cppbuild::app
         }
         ninja::write_ninja_build({.graph = graph,
                                   .order = *order,
-                                  .toolchain = tc,
+                                  .toolchain = toolchain,
                                   .build_dir = opts.build_dir,
                                   .self_path = opts.self_path});
         compdb::write_compile_commands({.graph = graph,
-                                        .cxx_compiler = tc.cxx_compiler,
-                                        .c_compiler = tc.c_compiler,
-                                        .cxxflags = helpers::to_views(tc.cxxflags),
-                                        .cflags = helpers::to_views(tc.cflags),
+                                        .cxx_compiler = toolchain.cxx_compiler,
+                                        .c_compiler = toolchain.c_compiler,
+                                        .cxxflags = helpers::to_views(toolchain.cxxflags),
+                                        .cflags = helpers::to_views(toolchain.cflags),
                                         .output_dir = opts.build_dir});
         ninja::write_ninja_install(
-            {.install_targets = targets.install_targets, .build_dir = opts.build_dir, .prefix = opts.prefix});
-        cache::save_cache(tc, graph, opts.build_dir);
+            {.install_targets = result.install_targets, .build_dir = opts.build_dir, .prefix = opts.prefix});
+        cache::save_cache(toolchain, graph, opts.build_dir);
         return 0;
     }
     struct reconfigure_options
