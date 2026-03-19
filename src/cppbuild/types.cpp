@@ -1,13 +1,9 @@
 module;
-#include <cstdlib>
-#include <vector>
-#include "graaflib/graph.h"
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
-export module cppbuild.types;
+export module cppbuild:types;
 import std;
-export namespace cppbuild::types
+import fmt;
+import graaf;
+export namespace cppbuild
 {
     struct target
     {
@@ -36,13 +32,13 @@ export namespace cppbuild::types
     struct graph_result
     {
         public:
-            graaf::directed_graph<cppbuild::types::target, int> g;
+            graaf::directed_graph<cppbuild::target, int> g;
             std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
     };
     struct cache_result
     {
         public:
-            cppbuild::types::graph_result graph;
-            cppbuild::types::toolchain toolchain;
+            cppbuild::graph_result graph;
+            cppbuild::toolchain toolchain;
     };
 } // namespace cppbuild::types

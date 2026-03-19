@@ -1,23 +1,18 @@
 module;
-#include <cstdlib>
-#include <vector>
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
-#include "graaflib/graph.h"
 #include <simdjson.h>
-
-export module cppbuild.cache;
+export module cppbuild:cache;
 import std;
-import cppbuild.types;
-import cppbuild.core;
-import cppbuild.helpers;
-import cppbuild.umka;
-export namespace cppbuild::cache
+import graaf;
+import fmt;
+import :types;
+import :core;
+import :helpers;
+import :umka;
+export namespace cppbuild
 {
     using namespace cppbuild;
-    auto save_cache(const types::toolchain &tc,
-                    const graaf::directed_graph<types::target, int> &graph,
+    auto save_cache(const toolchain &tc,
+                    const graaf::directed_graph<target, int> &graph,
                     const std::filesystem::path &build_dir) -> void
     {
         fmt::ostream file = fmt::output_file((build_dir / "cache.json").string());
@@ -26,10 +21,10 @@ export namespace cppbuild::cache
         file.print("    \"cxx_compiler\": \"{}\",\n", tc.cxx_compiler);
         file.print("    \"c_compiler\": \"{}\",\n", tc.c_compiler);
         file.print("    \"archiver\": \"{}\",\n", tc.archiver);
-        file.print("    \"cxxflags\": [{}],\n", helpers::quote_flags(tc.cxxflags));
-        file.print("    \"cflags\": [{}],\n", helpers::quote_flags(tc.cflags));
-        file.print("    \"exe_ldflags\": [{}],\n", helpers::quote_flags(tc.exe_ldflags));
-        file.print("    \"shared_ldflags\": [{}]\n", helpers::quote_flags(tc.shared_ldflags));
+        file.print("    \"cxxflags\": [{}],\n", quote_flags(tc.cxxflags));
+        file.print("    \"cflags\": [{}],\n", quote_flags(tc.cflags));
+        file.print("    \"exe_ldflags\": [{}],\n", quote_flags(tc.exe_ldflags));
+        file.print("    \"shared_ldflags\": [{}]\n", quote_flags(tc.shared_ldflags));
         file.print("  }},\n");
         file.print("  \"targets\": [\n");
         bool first{true};
@@ -68,14 +63,14 @@ export namespace cppbuild::cache
         file.print("}}\n");
     }
 
-    auto load_graph(const std::filesystem::path &path, const std::filesystem::path &src_dir) -> types::graph_result
+    auto load_graph(const std::filesystem::path &path, const std::filesystem::path &src_dir) -> graph_result
     {
         simdjson::dom::parser parser;
         auto doc = parser.load(path.string());
-        umka::umka_cxx_result cxx_result;
+        umka_cxx_result cxx_result;
         for (auto t : doc["targets"])
         {
-            umka::umka_cxx_build_target ct;
+            umka_cxx_build_target ct;
             ct.name = std::string(t["name"].get_string().value());
             ct.kind = std::string(t["type"].get_string().value());
             for (auto src : t["srcs"].get_array().value())
@@ -88,19 +83,19 @@ export namespace cppbuild::cache
             }
             cxx_result.build_targets.push_back(std::move(ct));
         }
-        return core::build_graph(cxx_result, src_dir);
+        return build_graph(cxx_result, src_dir);
     }
 
-    auto load_cache(const std::filesystem::path &path) -> types::cache_result
+    auto load_cache(const std::filesystem::path &path) -> cache_result
     {
         simdjson::dom::parser parser;
         simdjson::dom::element doc;
-        types::cache_result result{};
+        cache_result result{};
         if (parser.load(path.string()).get(doc) != simdjson::SUCCESS)
         {
             return result;
         }
-        types::toolchain tc{};
+        toolchain tc{};
         simdjson::dom::element tc_doc;
         if (doc["toolchain"].get(tc_doc) != simdjson::SUCCESS)
         {
@@ -147,10 +142,10 @@ export namespace cppbuild::cache
                 tc.shared_ldflags.push_back(std::string(f.get_string().value()));
             }
         }
-        umka::umka_cxx_result cxx_result;
+        umka_cxx_result cxx_result;
         for (auto t : doc["targets"])
         {
-            umka::umka_cxx_build_target ct{};
+            umka_cxx_build_target ct{};
             ct.name = std::string(t["name"].get_string().value());
             ct.kind = std::string(t["type"].get_string().value());
             for (auto src : t["srcs"].get_array().value())
@@ -164,7 +159,7 @@ export namespace cppbuild::cache
             cxx_result.build_targets.push_back(std::move(ct));
         }
         result.toolchain = tc;
-        result.graph = core::build_graph(cxx_result, "");
+        result.graph = build_graph(cxx_result, "");
         return result;
     }
 } // namespace cppbuild::cache

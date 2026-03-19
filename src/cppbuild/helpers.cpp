@@ -1,16 +1,14 @@
 module;
-#include <cstdlib>
-#include <vector>
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
-#include "graaflib/graph.h"
 #include <simdjson.h>
 
-export module cppbuild.helpers;
+export module cppbuild:helpers;
 import std;
-import cppbuild.types;
-export namespace cppbuild::helpers
+import fmt;
+import graaf;
+
+
+import :types;
+export namespace cppbuild
 {
     using namespace cppbuild;
     auto to_views(const std::vector<std::string> &vec) -> std::vector<std::string_view>

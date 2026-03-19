@@ -1,16 +1,13 @@
 module;
-#include <cstdlib>
-#include <vector>
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
-#include "graaflib/graph.h"
 #include <simdjson.h>
 
-export module cppbuild.compdb;
+export module cppbuild:compdb;
 import std;
-import cppbuild.types;
-export namespace cppbuild::compdb
+import graaf;
+import fmt;
+
+import :types;
+export namespace cppbuild
 {
     using namespace cppbuild;
     auto join_flags(const std::vector<std::string_view> &flags) -> std::string
@@ -21,7 +18,7 @@ export namespace cppbuild::compdb
     struct write_module_commands_options
     {
         public:
-            graaf::directed_graph<types::target, int> &graph;
+            graaf::directed_graph<target, int> &graph;
             std::string_view cxx_compiler;
             std::vector<std::string_view> cxxflags;
             std::filesystem::path output_dir;
@@ -30,7 +27,7 @@ export namespace cppbuild::compdb
     struct write_compile_commands_options
     {
         public:
-            graaf::directed_graph<cppbuild::types::target, int> &graph;
+            graaf::directed_graph<cppbuild::target, int> &graph;
             std::string_view cxx_compiler;
             std::string_view c_compiler;
             std::vector<std::string_view> cxxflags;
@@ -112,7 +109,7 @@ export namespace cppbuild::compdb
         file.print("\n]\n");
     }
 
-    auto fill_module_names(graaf::directed_graph<cppbuild::types::target, int> &graph, std::string_view scan_output)
+    auto fill_module_names(graaf::directed_graph<cppbuild::target, int> &graph, std::string_view scan_output)
         -> void
     {
         simdjson::dom::parser parser{};

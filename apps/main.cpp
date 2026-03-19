@@ -1,18 +1,8 @@
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
 #include "cxxopts.hpp"
 
 import std;
-import cppbuild.umka;
-import cppbuild.types;
-import cppbuild.compdb;
-import cppbuild.ninja;
-import cppbuild.toolchain;
-import cppbuild.helpers;
-import cppbuild.cache;
-import cppbuild.core;
-import cppbuild.app;
+import fmt;
+import cppbuild;
 
 auto main(int argc, char **argv) -> int
 {
@@ -29,7 +19,7 @@ auto main(int argc, char **argv) -> int
     std::string mode = result["mode"].as<std::string>();
     if (mode == "configure")
     {
-        return app::configure({.src_dir = result["src_dir"].as<std::string>(),
+        return configure({.src_dir = result["src_dir"].as<std::string>(),
                                .build_dir = result["build_dir"].as<std::string>(),
                                .toolchain_path = result["toolchain"].as<std::string>(),
                                .self_path = self_path,
@@ -37,15 +27,15 @@ auto main(int argc, char **argv) -> int
     }
     else if (mode == "scan")
     {
-        app::generate_dyndep(result["compdb_path"].as<std::string>());
+        generate_dyndep(result["compdb_path"].as<std::string>());
     }
     else if (mode == "reconfigure")
     {
-        return app::reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path});
+        return reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path});
     }
     else if (mode == "build")
     {
-        if (app::reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path}) != 0)
+        if (reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path}) != 0)
         {
             return 1;
         }

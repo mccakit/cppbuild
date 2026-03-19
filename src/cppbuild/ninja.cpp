@@ -1,21 +1,19 @@
 module;
 #include <cstdlib>
 #include <vector>
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
-#include "graaflib/graph.h"
 
-export module cppbuild.ninja;
+export module cppbuild:ninja;
 import std;
-import cppbuild.types;
-import cppbuild.helpers;
-import cppbuild.umka;
-export namespace cppbuild::ninja
+import fmt;
+import graaf;
+import :types;
+import :helpers;
+import :umka;
+export namespace cppbuild
 {
     using namespace cppbuild;
     auto write_ninja_build_rules(fmt::ostream &file,
-                                 const types::toolchain &toolchain,
+                                 const toolchain &toolchain,
                                  const std::filesystem::path &self_path) -> void
     {
         file.print("rule scan_deps\n");
@@ -53,9 +51,9 @@ export namespace cppbuild::ninja
         file.print("  description = AR $out\n\n");
     }
     auto write_ninja_build_precompile_edges(fmt::ostream &file,
-                                            const graaf::directed_graph<types::target, int> &graph,
+                                            const graaf::directed_graph<target, int> &graph,
                                             const std::vector<graaf::vertex_id_t> &order,
-                                            const types::toolchain &toolchain) -> void
+                                            const toolchain &toolchain) -> void
     {
         for (auto id : order)
         {
@@ -91,7 +89,7 @@ export namespace cppbuild::ninja
         }
         file.print("\n");
     }
-    auto collect_deps(const graaf::directed_graph<cppbuild::types::target, int> &graph, graaf::vertex_id_t id)
+    auto collect_deps(const graaf::directed_graph<cppbuild::target, int> &graph, graaf::vertex_id_t id)
         -> std::vector<graaf::vertex_id_t>
     {
         std::vector<graaf::vertex_id_t> deps;
@@ -116,9 +114,9 @@ export namespace cppbuild::ninja
         return deps;
     }
     auto write_ninja_build_codegen_edges(fmt::ostream &file,
-                                         const graaf::directed_graph<cppbuild::types::target, int> &graph,
+                                         const graaf::directed_graph<cppbuild::target, int> &graph,
                                          const std::vector<graaf::vertex_id_t> &order,
-                                         const types::toolchain &toolchain) -> void
+                                         const toolchain &toolchain) -> void
     {
         for (auto id : order)
         {
@@ -200,9 +198,9 @@ export namespace cppbuild::ninja
         file.print("\n");
     }
     auto write_ninja_build_link_edges(fmt::ostream &file,
-                                      const graaf::directed_graph<cppbuild::types::target, int> &graph,
+                                      const graaf::directed_graph<cppbuild::target, int> &graph,
                                       const std::vector<graaf::vertex_id_t> &order,
-                                      const types::toolchain &toolchain) -> void
+                                      const toolchain &toolchain) -> void
     {
         for (auto id : order)
         {
@@ -247,9 +245,9 @@ export namespace cppbuild::ninja
     struct write_ninja_options
     {
         public:
-            const graaf::directed_graph<cppbuild::types::target, int> &graph;
+            const graaf::directed_graph<cppbuild::target, int> &graph;
             const std::vector<graaf::vertex_id_t> &order;
-            const types::toolchain &toolchain;
+            const toolchain &toolchain;
             const std::filesystem::path &build_dir;
             const std::filesystem::path &self_path;
     };
@@ -264,7 +262,7 @@ export namespace cppbuild::ninja
     struct write_ninja_install_options
     {
         public:
-            const std::vector<umka::umka_cxx_install_target> &install_targets;
+            const std::vector<umka_cxx_install_target> &install_targets;
             const std::filesystem::path &build_dir;
             const std::filesystem::path &prefix;
     };

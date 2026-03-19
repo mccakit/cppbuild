@@ -1,5 +1,5 @@
 [requires]
 fmt/master
 simdjson/master
-graaf/alt_main
+neograaf/main
 umka/pr0

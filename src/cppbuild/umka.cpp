@@ -1,11 +1,9 @@
 module;
 #include <umka_api.h>
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
-export module cppbuild.umka;
+export module cppbuild:umka;
 import std;
-export namespace cppbuild::umka
+import fmt;
+export namespace cppbuild
 {
     constexpr char cppbuild_mod[] = {
 #embed "umka_modules/cppbuild.um"

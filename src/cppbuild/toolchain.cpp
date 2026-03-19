@@ -1,16 +1,15 @@
 module;
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
 #include <simdjson.h>
 
-export module cppbuild.toolchain;
+export module cppbuild:toolchain;
 import std;
-import cppbuild.types;
-export namespace cppbuild::toolchain
+import fmt;
+import :types;
+
+export namespace cppbuild
 {
     using namespace cppbuild;
-    auto parse_toolchain(const std::filesystem::path &path, types::toolchain &tc) -> void
+    auto parse_toolchain(const std::filesystem::path &path, toolchain &tc) -> void
     {
         simdjson::dom::parser parser;
         auto doc = parser.load(path.string());

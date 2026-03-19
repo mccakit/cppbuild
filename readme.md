@@ -8,7 +8,7 @@ Built as a direct response to the bloat and overreach of existing tools like CMa
 
 Install dependencies:
 ```sh
-conan install . --build=missing --profile=native -of ./conan --deployer=./conandeploy.py --envs-generation=false
+conan install . --build=missing --profile=native -of ./conan --deployer=full_deploy --envs-generation=false
 ```
 
 Configure and build:

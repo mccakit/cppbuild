@@ -1,26 +1,20 @@
 module;
-#include <cstdlib>
-#include <vector>
-#include <optional>
-#include <fmt/base.h>
-#include <fmt/os.h>
-#include <fmt/ranges.h>
-#include "graaflib/graph.h"
-#include "graaflib/algorithm/topological_sorting/dfs_topological_sorting.h"
 #include <simdjson.h>
 #include "subprocess.h"
 
-export module cppbuild.app;
+export module cppbuild:app;
 import std;
-import cppbuild.types;
-import cppbuild.core;
-import cppbuild.helpers;
-import cppbuild.ninja;
-import cppbuild.compdb;
-import cppbuild.cache;
-import cppbuild.toolchain;
-import cppbuild.umka;
-export namespace cppbuild::app
+import graaf;
+import fmt;
+import :types;
+import :core;
+import :helpers;
+import :ninja;
+import :compdb;
+import :cache;
+import :toolchain;
+import :umka;
+export namespace cppbuild
 {
     using namespace cppbuild;
     void generate_dyndep(const std::filesystem::path &path)
@@ -76,7 +70,7 @@ export namespace cppbuild::app
             out << "build " << pcm << ": dyndep" << (deps.empty() ? "" : " |" + deps) << "\n";
         }
     }
-    auto scan_p1689(const std::filesystem::path &build_dir, const types::toolchain &toolchain) -> std::string
+    auto scan_p1689(const std::filesystem::path &build_dir, const toolchain &toolchain) -> std::string
     {
         const auto module_commands = (build_dir / "module_commands.json").string();
         const auto scanner = std::string{toolchain.cxx_scanner};
@@ -101,7 +95,7 @@ export namespace cppbuild::app
         subprocess_destroy(&subprocess);
         return scan_output;
     }
-    auto resolve_file_paths(umka::umka_cxx_result &result,
+    auto resolve_file_paths(umka_cxx_result &result,
                             const std::filesystem::path &src_dir,
                             const std::filesystem::path &build_dir) -> void
     {
@@ -132,37 +126,37 @@ export namespace cppbuild::app
     };
     auto configure(const configure_options &opts) -> int
     {
-        types::toolchain toolchain{};
-        umka::umka umka{};
-        umka::umka_cxx_result result = umka.run((opts.src_dir / "build.um").string(), "configure");
+        toolchain toolchain{};
+        umka umka{};
+        umka_cxx_result result = umka.run((opts.src_dir / "build.um").string(), "configure");
         resolve_file_paths(result, opts.src_dir, opts.build_dir);
-        types::graph_result res{core::build_graph(result, opts.src_dir)};
-        graaf::directed_graph<types::target, int> graph{std::move(res.g)};
-        toolchain::parse_toolchain(opts.toolchain_path, toolchain);
-        compdb::write_named_module_compile_commands({.graph = graph,
+        graph_result res{build_graph(result, opts.src_dir)};
+        graaf::directed_graph<target, int> graph{std::move(res.g)};
+        parse_toolchain(opts.toolchain_path, toolchain);
+        write_named_module_compile_commands({.graph = graph,
                                                      .cxx_compiler = toolchain.cxx_compiler,
-                                                     .cxxflags = helpers::to_views(toolchain.cxxflags),
+                                                     .cxxflags = to_views(toolchain.cxxflags),
                                                      .output_dir = opts.build_dir});
-        compdb::fill_module_names(graph, scan_p1689(opts.build_dir, toolchain));
+        fill_module_names(graph, scan_p1689(opts.build_dir, toolchain));
         const auto order = graaf::algorithm::dfs_topological_sort(graph);
         if (!order)
         {
             return 1;
         }
-        ninja::write_ninja_build({.graph = graph,
+        write_ninja_build({.graph = graph,
                                   .order = *order,
                                   .toolchain = toolchain,
                                   .build_dir = opts.build_dir,
                                   .self_path = opts.self_path});
-        compdb::write_compile_commands({.graph = graph,
+        write_compile_commands({.graph = graph,
                                         .cxx_compiler = toolchain.cxx_compiler,
                                         .c_compiler = toolchain.c_compiler,
-                                        .cxxflags = helpers::to_views(toolchain.cxxflags),
-                                        .cflags = helpers::to_views(toolchain.cflags),
+                                        .cxxflags = to_views(toolchain.cxxflags),
+                                        .cflags = to_views(toolchain.cflags),
                                         .output_dir = opts.build_dir});
-        ninja::write_ninja_install(
+        write_ninja_install(
             {.install_targets = result.install_targets, .build_dir = opts.build_dir, .prefix = opts.prefix});
-        cache::save_cache(toolchain, graph, opts.build_dir);
+        save_cache(toolchain, graph, opts.build_dir);
         return 0;
     }
     struct reconfigure_options
@@ -173,16 +167,16 @@ export namespace cppbuild::app
     };
     auto reconfigure(const reconfigure_options &opts) -> int
     {
-        types::cache_result cache = cache::load_cache(opts.build_dir / "cache.json");
-        graaf::directed_graph<types::target, int> graph{std::move(cache.graph.g)};
-        compdb::fill_module_names(graph, scan_p1689(opts.build_dir, cache.toolchain));
+        cache_result cache = load_cache(opts.build_dir / "cache.json");
+        graaf::directed_graph<target, int> graph{std::move(cache.graph.g)};
+        fill_module_names(graph, scan_p1689(opts.build_dir, cache.toolchain));
         const auto order = graaf::algorithm::dfs_topological_sort(graph);
         if (!order)
         {
             fmt::println("Reconfigure failed");
             return 1;
         }
-        ninja::write_ninja_build({.graph = graph,
+        write_ninja_build({.graph = graph,
                                   .order = *order,
                                   .toolchain = cache.toolchain,
                                   .build_dir = opts.build_dir,
