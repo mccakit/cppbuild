@@ -1,50 +1,74 @@
-#include "cxxopts.hpp"
-
+#include <CLI/CLI.hpp>
 import std;
-import fmt;
+import umkacxx;
 import cppbuild;
+using CLI::App;
 
 auto main(int argc, char **argv) -> int
 {
-    using namespace cppbuild;
-    cxxopts::Options options{"cppbuild", "C++ build system"};
-    auto opts = options.add_options();
-    opts("mode", "Program mode", cxxopts::value<std::string>());
-    opts("build_dir", "Build directory", cxxopts::value<std::string>());
-    opts("src_dir", "Source directory", cxxopts::value<std::string>());
-    opts("toolchain", "Toolchain file", cxxopts::value<std::string>());
-    opts("prefix", "Install prefix", cxxopts::value<std::string>());
-    opts("compdb_path", "Compilation database path", cxxopts::value<std::string>());
-    cxxopts::ParseResult result = options.parse(argc, argv);
-    std::filesystem::path self_path = std::filesystem::weakly_canonical(argv[0]);
-    std::string mode = result["mode"].as<std::string>();
-    if (mode == "configure")
+    App app {"cppbuild — Modern Umka-powered Build System"};
+    std::string script_path {};
+    std::string toolchain_path {};
+    std::string build_dir {};
+    std::string install_dir {};
+    // Configure Subcommand
+    auto config = app.add_subcommand("configure", "Configure the project");
+    config->add_option("-S,--script-path", script_path, "Path to build script");
+    config->add_option("-T,--toolchain-path", toolchain_path, "Compiler toolchain to use");
+    config->add_option("-B,--build-dir", build_dir, "Build directory");
+    // Build Subcommand
+    auto build = app.add_subcommand("build", "Execute build targets");
+    build->add_option("-B,--build-dir", build_dir, "Build directory");
+    // Install Subcommand
+    auto install = app.add_subcommand("install", "Install build artifacts");
+    install->add_option("-B,--build-dir", build_dir, "Source build directory");
+    install->add_option("-I,--install-dir", install_dir, "Installation prefix");
+    // Scan Subcommand
+    auto scan = app.add_subcommand("scan", "Scan for source changes/dependencies");
+    scan->add_option("-B,--build-dir", build_dir, "Build directory");
+    try
     {
-        return configure({.src_dir = result["src_dir"].as<std::string>(),
-                          .build_dir = result["build_dir"].as<std::string>(),
-                          .toolchain_path = result["toolchain"].as<std::string>(),
-                          .self_path = self_path,
-                          .prefix = std::filesystem::weakly_canonical(result["prefix"].as<std::string>())});
+        app.parse(argc, argv);
     }
-    else if (mode == "scan")
+    catch (const CLI::ParseError &e)
     {
-        generate_dyndep(result["compdb_path"].as<std::string>());
+        return app.exit(e);
     }
-    else if (mode == "reconfigure")
+
+    build_dir = std::filesystem::weakly_canonical(build_dir);
+    script_path = std::filesystem::weakly_canonical(script_path);
+    toolchain_path = std::filesystem::weakly_canonical(toolchain_path);
+    install_dir = std::filesystem::weakly_canonical(install_dir);
+    if (config->parsed())
     {
-        return reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path});
+        std::filesystem::create_directories(build_dir);
+        cppbuild::types::toolchain tc {};
+        tc.parse(toolchain_path);
+        cppbuild::script script {script_path};
+        auto result = script.run();
+        cppbuild::types::build_graph graph {};
+        graph.parse(result, script_path);
+        cppbuild::write_compile_commands({.build_graph = graph, .tc = tc, .output_dir = build_dir});
+        cppbuild::write_named_module_compile_commands({.build_graph = graph, .tc = tc, .output_dir = build_dir});
+        graph.scan(build_dir, tc);
+        graph.order();
+        graph.print_link_targets();
+        cppbuild::write_ninja_build({.graph = graph,
+                           .toolchain = tc,
+                           .build_dir = build_dir,
+                           .self_path = std::filesystem::weakly_canonical(argv[0])});
     }
-    else if (mode == "build")
+    else if (build->parsed())
     {
-        if (reconfigure({.build_dir = result["build_dir"].as<std::string>(), .self_path = self_path}) != 0)
-        {
-            return 1;
-        }
-        return std::system(fmt::format("ninja -C {}", result["build_dir"].as<std::string>()).c_str());
+        std::println("Building from: {}", build_dir);
     }
-    else if (mode == "install")
+    else if (install->parsed())
     {
-        return std::system(fmt::format("ninja -C {} -f install.ninja", result["build_dir"].as<std::string>()).c_str());
+        std::println("Installing from {} to {}", build_dir, install_dir);
+    }
+    else if (scan->parsed())
+    {
+        cppbuild::generate_dyndep(build_dir);
     }
     return 0;
 }

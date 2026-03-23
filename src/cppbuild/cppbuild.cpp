@@ -1,11 +1,7 @@
 export module cppbuild;
 
-export import :app;
-export import :cache;
-export import :compdb;
-export import :core;
-export import :helpers;
-export import :ninja;
-export import :toolchain;
+export import :modules_cppbuild;
+export import :scripting;
 export import :types;
-export import :umka;
+export import :compdb;
+export import :ninja;
