@@ -17,10 +17,6 @@ export namespace cppbuild
         file.print("  description = SCAN $out\n");
         file.print("  restat = 1\n\n");
 
-        file.print("rule generate\n");
-        file.print("  command = $cmd $in $out\n");
-        file.print("  description = GEN $out\n\n");
-
         file.print("rule precompile\n");
         file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out "
                    "-fprebuilt-module-path=. $cxxflags\n",
@@ -59,43 +55,6 @@ export namespace cppbuild
         file.print("  build_dir = {}\n\n", build_dir.string());
     }
 
-    auto write_ninja_build_generate_edges(fmt::ostream &file,
-                                          const types::build_graph &graph,
-                                          const std::filesystem::path &build_dir) -> void
-    {
-        for (auto id : graph.topo_order)
-        {
-            const auto &target = graph.graph.get_vertex(id);
-            for (const auto &sg : target.srcs)
-            {
-                if (!sg.generated)
-                    continue;
-
-                std::string file_extension;
-                if (sg.kind == "translation_unit")
-                {
-                    file_extension = "hpp";
-                }
-                else if (sg.kind == "header_unit")
-                {
-                    file_extension = "cpp";
-                }
-
-                for (const auto &input : sg.inputs)
-                {
-                    std::string out_file = input.stem().string() + "." + file_extension;
-
-                    file.print("build {}: generate {}\n", out_file, input.string());
-
-                    // REMOVE the input/output filenames from sg.command if they are already there
-                    // OR ensure your rule definition matches what is being printed.
-                    file.print("  cmd = {}\n", sg.command);
-                }
-            }
-        }
-        file.print("\n");
-    }
-
     auto write_ninja_build_precompile_edges(fmt::ostream &file,
                                             const types::build_graph &bg,
                                             const types::toolchain &toolchain) -> void
@@ -122,30 +81,14 @@ export namespace cppbuild
                 }
                 else if (sg.kind == "header_unit")
                 {
-                    if (sg.generated)
+                    for (const auto &src : sg.srcs)
                     {
-                        for (const auto &in : sg.inputs)
+                        file.print("build {}.pcm: precompile_header_unit {}\n", src.filename().string(), src.string());
+                        if (!toolchain.cxxflags.empty() or !target.cxxflags.empty())
                         {
-                            file.print("build {}.pcm: precompile_header_unit {}\n", in.stem().string() + ".hpp", in.stem().string() + ".hpp");
-                            if (!toolchain.cxxflags.empty() or !target.cxxflags.empty())
-                            {
-                                file.print("  cxxflags = {} {}\n",
-                                           fmt::join(toolchain.cxxflags, " "),
-                                           fmt::join(target.cxxflags, " "));
-                            }
-                        }
-                    }
-                    else
-                    {
-                        for (const auto &src : sg.srcs)
-                        {
-                            file.print("build {}.pcm: precompile_header_unit {}\n", src.filename().string(), src.string());
-                            if (!toolchain.cxxflags.empty() or !target.cxxflags.empty())
-                            {
-                                file.print("  cxxflags = {} {}\n",
-                                           fmt::join(toolchain.cxxflags, " "),
-                                           fmt::join(target.cxxflags, " "));
-                            }
+                            file.print("  cxxflags = {} {}\n",
+                                        fmt::join(toolchain.cxxflags, " "),
+                                        fmt::join(target.cxxflags, " "));
                         }
                     }
                 }
@@ -196,14 +139,6 @@ export namespace cppbuild
                     {
                         header_unit_dependency_flags += fmt::format(" -fmodule-file={}.pcm", src.filename().string());
                         header_unit_output_files += fmt::format(" {}.pcm", src.filename().string());
-                    }
-                    if (sg.generated)
-                    {
-                        for (const auto &in : sg.inputs)
-                        {
-                            header_unit_dependency_flags += fmt::format(" -fmodule-file={}.pcm", in.stem().string() + ".hpp");
-                            header_unit_output_files += fmt::format(" {}.pcm", in.stem().string() + ".hpp");
-                        }
                     }
                 }
             }
@@ -342,7 +277,6 @@ export namespace cppbuild
     {
         fmt::ostream file {fmt::output_file((opts.build_dir / "build.ninja").string())};
         write_ninja_build_rules(file, opts.toolchain, opts.self_path, opts.build_dir);
-        write_ninja_build_generate_edges(file, opts.graph, opts.build_dir);
         write_ninja_build_precompile_edges(file, opts.graph, opts.toolchain);
         write_ninja_build_codegen_edges(file, opts.graph, opts.toolchain);
         write_ninja_build_link_edges(file, opts.graph, opts.toolchain);

@@ -1,7 +1,4 @@
 type source_files* = struct {
-    generated: bool
-    command:   str
-    inputs:    []str
     kind:      str
     srcs:      []str
 }

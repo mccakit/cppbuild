@@ -52,7 +52,6 @@ auto main(int argc, char **argv) -> int
         cppbuild::write_named_module_compile_commands({.build_graph = graph, .tc = tc, .output_dir = build_dir});
         graph.scan(build_dir, tc);
         graph.order();
-        graph.print_link_targets();
         cppbuild::write_ninja_build({.graph = graph,
                            .toolchain = tc,
                            .build_dir = build_dir,

@@ -11,9 +11,6 @@ export namespace cppbuild::types
     class source_group
     {
         public:
-            bool generated {};
-            std::string command {};
-            std::vector<std::filesystem::path> inputs;
             std::string kind {};
             std::vector<std::filesystem::path> srcs;
     };
@@ -129,10 +126,7 @@ export namespace cppbuild::types
                         {
                             src = std::filesystem::weakly_canonical(src_dir / src);
                         }
-                        target.srcs.push_back(types::source_group {.generated = sg_raw.generated,
-                                                                   .command = std::move(sg_raw.command),
-                                                                   .inputs = std::move(sg_raw.inputs),
-                                                                   .kind = std::move(sg_raw.kind),
+                        target.srcs.push_back(types::source_group {.kind = std::move(sg_raw.kind),
                                                                    .srcs = std::move(sg_raw.srcs)});
                     }
                     std::string target_name = target.name;

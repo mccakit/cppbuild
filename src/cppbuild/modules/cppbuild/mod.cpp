@@ -10,24 +10,16 @@ constexpr char src[] = {
 struct source_files_umka
 {
     public:
-        umkacxx::types::bool_t generated;
-        umkacxx::types::str_t command;
-        umkacxx::types::arr_t<umkacxx::types::str_t> inputs;
         umkacxx::types::str_t kind;
         umkacxx::types::arr_t<umkacxx::types::str_t> srcs;
 };
 class source_files_cxx
 {
     public:
-        bool generated {};
-        std::string command {};
-        std::vector<std::filesystem::path> inputs;
         std::string kind {};
         std::vector<std::filesystem::path> srcs;
         source_files_cxx(const source_files_umka &raw)
-            : generated {raw.generated}, command {raw.command ? raw.command : ""}, kind {raw.kind ? raw.kind : ""},
-              inputs {raw.inputs.data, raw.inputs.data + raw.inputs.len()},
-              srcs {raw.srcs.data, raw.srcs.data + raw.srcs.len()}
+            : kind {raw.kind ? raw.kind : ""}, srcs {raw.srcs.data, raw.srcs.data + raw.srcs.len()}
         {
         }
 };
