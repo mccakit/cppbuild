@@ -3,9 +3,22 @@ type source_files* = struct {
     srcs:      []str
 }
 
+type gen_output* = struct {
+    path:        str
+    kind:        str
+    module_name: str
+}
+
+type gen_srcs* = struct {
+    command: []str
+    inputs:  []str
+    outputs: []gen_output
+}
+
 type build_target* = struct {
     name:     str
     srcs:     []source_files
+    gen_groups: []gen_srcs
     deps:     []str
     cxxflags: []str
     cflags:   []str

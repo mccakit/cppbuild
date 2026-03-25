@@ -34,14 +34,10 @@ export namespace cppbuild
         {
             std::filesystem::create_directories(opts.output_dir);
         }
-
         const auto output_path = std::filesystem::absolute(opts.output_dir) / "module_commands.json";
         fmt::ostream file = fmt::output_file(output_path.string());
-
         file.print("[\n");
         bool first {true};
-
-        // Access the graph member within the build_graph class
         for (const auto &[id, target] : opts.build_graph.graph.get_vertices())
         {
             for (const auto &source_group : target.srcs)
@@ -50,14 +46,12 @@ export namespace cppbuild
                 {
                     continue;
                 }
-
                 for (const auto &src : source_group.srcs)
                 {
                     if (!first)
                     {
                         file.print(",\n");
                     }
-
                     file.print("  {{\"directory\":\".\",\"command\":\"{} {} {} -x c++ -c "
                                "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
                                opts.tc.cxx_compiler,
@@ -66,6 +60,30 @@ export namespace cppbuild
                                src.string(),
                                src.string(),
                                src.string());
+                    first = false;
+                }
+            }
+
+            for (const auto &gg : target.gen_groups)
+            {
+                for (const auto &out : gg.outputs)
+                {
+                    if (out.kind != "named_module")
+                    {
+                        continue;
+                    }
+                    if (!first)
+                    {
+                        file.print(",\n");
+                    }
+                    file.print("  {{\"directory\":\".\",\"command\":\"{} {} {} -x c++ -c "
+                               "{}\",\"file\":\"{}\",\"output\":\"{}.o\"}}",
+                               opts.tc.cxx_compiler,
+                               join_flags(opts.tc.cxxflags),
+                               join_flags(target.cxxflags),
+                               out.path.string(),
+                               out.path.string(),
+                               out.path.string());
                     first = false;
                 }
             }
@@ -184,7 +202,8 @@ export namespace cppbuild
         const char *command_line[] = {
             "clang-scan-deps", "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
         struct subprocess_s subprocess;
-        int options = subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
+        int options =
+            subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
         if (subprocess_create(command_line, options, &subprocess) != 0)
         {
             return;

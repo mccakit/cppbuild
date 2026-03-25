@@ -24,11 +24,62 @@ class source_files_cxx
         }
 };
 
+struct gen_output_umka
+{
+    public:
+        umkacxx::types::str_t path;
+        umkacxx::types::str_t kind;
+        umkacxx::types::str_t module_name;
+};
+
+struct gen_output_cxx
+{
+    public:
+        std::filesystem::path path {};
+        std::string kind {};
+        std::string module_name {};
+
+        gen_output_cxx(const gen_output_umka &raw)
+            : path {raw.path ? raw.path : ""}, kind {raw.kind ? raw.kind : ""},
+              module_name {raw.module_name ? raw.module_name : ""}
+        {
+        }
+};
+
+struct gen_src_umka
+{
+    public:
+        umkacxx::types::arr_t<umkacxx::types::str_t> command;
+        umkacxx::types::arr_t<umkacxx::types::str_t> inputs;
+        umkacxx::types::arr_t<gen_output_umka> outputs;
+};
+
+struct gen_src_cxx
+{
+    public:
+        std::vector<std::string> command {};
+        std::vector<std::filesystem::path> inputs {};
+        std::vector<gen_output_cxx> outputs {};
+
+        gen_src_cxx(const gen_src_umka &raw)
+            : command {raw.command.data, raw.command.data + raw.command.len()},
+              inputs {raw.inputs.data, raw.inputs.data + raw.inputs.len()}
+        {
+            auto len = raw.outputs.len();
+            outputs.reserve(len);
+            for (int i = 0; i < len; ++i)
+            {
+                outputs.emplace_back(raw.outputs.data[i]);
+            }
+        }
+};
+
 struct build_target_umka
 {
     public:
         umkacxx::types::str_t name;
         umkacxx::types::arr_t<source_files_umka> srcs;
+        umkacxx::types::arr_t<gen_src_umka> gen_groups;
         umkacxx::types::arr_t<umkacxx::types::str_t> deps;
         umkacxx::types::arr_t<umkacxx::types::str_t> cxxflags;
         umkacxx::types::arr_t<umkacxx::types::str_t> cflags;
@@ -39,19 +90,28 @@ struct build_target_cxx
     public:
         std::string name {};
         std::vector<source_files_cxx> srcs {};
+        std::vector<gen_src_cxx> gen_groups {};
         std::vector<std::string> deps {};
         std::vector<std::string> cxxflags {};
         std::vector<std::string> cflags {};
+
         build_target_cxx(const build_target_umka &raw)
             : name {raw.name ? raw.name : ""}, deps {raw.deps.data, raw.deps.data + raw.deps.len()},
               cxxflags {raw.cxxflags.data, raw.cxxflags.data + raw.cxxflags.len()},
               cflags {raw.cflags.data, raw.cflags.data + raw.cflags.len()}
         {
-            auto len = raw.srcs.len();
-            srcs.reserve(len);
-            for (int i = 0; i < len; ++i)
+            auto slen = raw.srcs.len();
+            srcs.reserve(slen);
+            for (int i = 0; i < slen; ++i)
             {
                 srcs.emplace_back(raw.srcs.data[i]);
+            }
+
+            auto glen = raw.gen_groups.len();
+            gen_groups.reserve(glen);
+            for (int i = 0; i < glen; ++i)
+            {
+                gen_groups.emplace_back(raw.gen_groups.data[i]);
             }
         }
 };

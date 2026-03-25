@@ -14,12 +14,27 @@ export namespace cppbuild::types
             std::string kind {};
             std::vector<std::filesystem::path> srcs;
     };
+    struct gen_output
+    {
+        public:
+            std::filesystem::path path {};
+            std::string kind {};
+            std::string module_name {};
+    };
 
+    class gen_group
+    {
+        public:
+            std::vector<std::string> command {};
+            std::vector<std::filesystem::path> inputs {};
+            std::vector<gen_output> outputs {};
+    };
     struct build_target
     {
         public:
             std::string name {};
             std::vector<source_group> srcs {};
+            std::vector<gen_group> gen_groups {};
             std::vector<std::string> deps {};
             std::vector<std::string> cxxflags {};
             std::vector<std::string> cflags {};
@@ -109,8 +124,12 @@ export namespace cppbuild::types
             std::vector<graaf::vertex_id_t> topo_order {};
             std::vector<link_target> link_targets {};
             std::vector<install_target> install_targets {};
-            auto parse(modules_cppbuild::results_cxx results, const std::filesystem::path &script_path) -> void
+            auto parse(modules_cppbuild::results_cxx results,
+                       const std::filesystem::path &script_path,
+                       const std::filesystem::path &build_dir) -> void
             {
+                std::string target_name {};
+                target_name.reserve(256);
                 const std::filesystem::path src_dir = script_path.parent_path();
                 name_to_id.reserve(results.build_targets.size());
                 for (auto &bt_raw : results.build_targets)
@@ -126,11 +145,33 @@ export namespace cppbuild::types
                         {
                             src = std::filesystem::weakly_canonical(src_dir / src);
                         }
-                        target.srcs.push_back(types::source_group {.kind = std::move(sg_raw.kind),
-                                                                   .srcs = std::move(sg_raw.srcs)});
+                        target.srcs.push_back(
+                            types::source_group {.kind = std::move(sg_raw.kind), .srcs = std::move(sg_raw.srcs)});
                     }
-                    std::string target_name = target.name;
+
+                    target.gen_groups.reserve(bt_raw.gen_groups.size());
+                    for (auto &gg_raw : bt_raw.gen_groups)
+                    {
+                        types::gen_group gg;
+                        gg.command = std::move(gg_raw.command);
+                        gg.inputs.reserve(gg_raw.inputs.size());
+                        for (auto &inp : gg_raw.inputs)
+                        {
+                            gg.inputs.push_back(std::filesystem::weakly_canonical(src_dir / inp));
+                        }
+                        gg.outputs.reserve(gg_raw.outputs.size());
+                        for (auto &out : gg_raw.outputs)
+                        {
+                            gg.outputs.push_back({.path = build_dir / out.path,
+                                                  .kind = std::move(out.kind),
+                                                  .module_name = std::move(out.module_name)});
+                        }
+                        target.gen_groups.push_back(std::move(gg));
+                    }
+
+                    target_name = target.name;
                     name_to_id[target_name] = graph.add_vertex(std::move(target));
+                    target_name.clear();
                 }
                 for (const auto &[name, id] : name_to_id)
                 {
@@ -162,8 +203,9 @@ export namespace cppbuild::types
                     {
                         files.push_back(std::filesystem::weakly_canonical(src_dir / f).string());
                     }
-                    install_targets.push_back(
-                        {.name = std::move(it_raw.name), .install_dir = std::move(it_raw.install_dir), .files = std::move(files)});
+                    install_targets.push_back({.name = std::move(it_raw.name),
+                                               .install_dir = std::move(it_raw.install_dir),
+                                               .files = std::move(files)});
                 }
             }
             auto scan(const std::filesystem::path &build_dir, const toolchain &toolchain) -> void
@@ -229,15 +271,68 @@ export namespace cppbuild::types
                 topo_order = std::move(result.value());
                 return true;
             }
-            auto print_link_targets() const -> void
+            auto print_input() const -> void
             {
+                fmt::println("=== Build Targets ({}) ===", graph.vertex_count());
+                for (const auto &[id, bt] : graph.get_vertices())
+                {
+                    fmt::println("  name: {}", bt.name);
+                    fmt::println("  deps: [{}]", fmt::join(bt.deps, ", "));
+                    fmt::println("  cxxflags: [{}]", fmt::join(bt.cxxflags, ", "));
+                    fmt::println("  cflags: [{}]", fmt::join(bt.cflags, ", "));
+                    fmt::println("  srcs ({}):", bt.srcs.size());
+                    for (const auto &sg : bt.srcs)
+                    {
+                        fmt::println("    kind: {}", sg.kind);
+                        for (const auto &src : sg.srcs)
+                        {
+                            fmt::println("      - {}", src.string());
+                        }
+                    }
+                    fmt::println("  gen_groups ({}):", bt.gen_groups.size());
+                    for (const auto &gg : bt.gen_groups)
+                    {
+                        fmt::println("    command: [{}]", fmt::join(gg.command, " "));
+                        fmt::println("    inputs ({}):", gg.inputs.size());
+                        for (const auto &inp : gg.inputs)
+                        {
+                            fmt::println("      - {}", inp.string());
+                        }
+                        fmt::println("    outputs ({}):", gg.outputs.size());
+                        for (const auto &out : gg.outputs)
+                        {
+                            fmt::println(
+                                "      - path={} kind={} module_name={}", out.path.string(), out.kind, out.module_name);
+                        }
+                    }
+                }
+                fmt::println("=== Link Targets ({}) ===", link_targets.size());
                 for (const auto &lt : link_targets)
                 {
-                    fmt::println("link_target: name={} kind={} deps=[{}] ldflags=[{}]",
+                    fmt::println("  name={} kind={} deps=[{}] ldflags=[{}]",
                                  lt.name,
                                  lt.kind,
                                  fmt::join(lt.deps, ", "),
                                  fmt::join(lt.ldflags, ", "));
+                }
+                fmt::println("=== Install Targets ({}) ===", install_targets.size());
+                for (const auto &it : install_targets)
+                {
+                    fmt::println("  name={} install_dir={} files=[{}]",
+                                 it.name,
+                                 it.install_dir.string(),
+                                 fmt::join(it.files, ", "));
+                }
+            }
+            auto print_modules() const -> void
+            {
+                for (const auto &[id, bt] : graph.get_vertices())
+                {
+                    fmt::println("  {} src_to_mname ({}):", bt.name, bt.src_to_mname.size());
+                    for (const auto &[src, mname] : bt.src_to_mname)
+                    {
+                        fmt::println("    {} -> {}", src, mname);
+                    }
                 }
             }
     };

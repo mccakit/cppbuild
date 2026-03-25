@@ -47,7 +47,7 @@ auto main(int argc, char **argv) -> int
         cppbuild::script script {script_path};
         auto result = script.run();
         cppbuild::types::build_graph graph {};
-        graph.parse(result, script_path);
+        graph.parse(result, script_path, build_dir);
         cppbuild::write_compile_commands({.build_graph = graph, .tc = tc, .output_dir = build_dir});
         cppbuild::write_named_module_compile_commands({.build_graph = graph, .tc = tc, .output_dir = build_dir});
         graph.scan(build_dir, tc);
