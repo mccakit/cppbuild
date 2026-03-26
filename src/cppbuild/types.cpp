@@ -8,7 +8,7 @@ import graaf;
 import :modules_cppbuild;
 export namespace cppbuild::types
 {
-    class source_group
+    struct source_group
     {
         public:
             std::string kind {};
@@ -22,7 +22,7 @@ export namespace cppbuild::types
             std::string module_name {};
     };
 
-    class gen_group
+    struct gen_group
     {
         public:
             std::vector<std::string> command {};
@@ -104,17 +104,6 @@ export namespace cppbuild::types
                 exe_ldflags = parse_flags(doc, "exe_ldflags");
                 shared_ldflags = parse_flags(doc, "shared_ldflags");
             }
-            auto print() const -> void
-            {
-                fmt::println("cxx_compiler:   {}", cxx_compiler);
-                fmt::println("c_compiler:     {}", c_compiler);
-                fmt::println("archiver:       {}", archiver);
-                fmt::println("cxx_scanner:    {}", cxx_scanner);
-                fmt::println("cxxflags:       {}", fmt::join(cxxflags, " "));
-                fmt::println("cflags:         {}", fmt::join(cflags, " "));
-                fmt::println("exe_ldflags:    {}", fmt::join(exe_ldflags, " "));
-                fmt::println("shared_ldflags: {}", fmt::join(shared_ldflags, " "));
-            }
     };
     class build_graph
     {
@@ -163,8 +152,7 @@ export namespace cppbuild::types
                         for (auto &out : gg_raw.outputs)
                         {
                             gg.outputs.push_back({.path = build_dir / out.path,
-                                                  .kind = std::move(out.kind),
-                                                  .module_name = std::move(out.module_name)});
+                                                  .kind = std::move(out.kind)});
                         }
                         target.gen_groups.push_back(std::move(gg));
                     }
@@ -208,58 +196,6 @@ export namespace cppbuild::types
                                                .files = std::move(files)});
                 }
             }
-            auto scan(const std::filesystem::path &build_dir, const toolchain &toolchain) -> void
-            {
-                const auto module_commands = (build_dir / "module_commands.json").string();
-                const auto scanner = std::string {toolchain.cxx_scanner};
-                const char *command_line[] = {
-                    scanner.c_str(), "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
-                struct subprocess_s subprocess;
-                int options = subprocess_option_search_user_path | subprocess_option_inherit_environment |
-                              subprocess_option_enable_async;
-                if (subprocess_create(command_line, options, &subprocess) != 0)
-                {
-                    return;
-                }
-                std::string scan_output;
-                char buf[4096];
-                unsigned bytes_read;
-                while ((bytes_read = subprocess_read_stdout(&subprocess, buf, sizeof(buf))) != 0)
-                {
-                    scan_output.append(buf, bytes_read);
-                }
-                int process_return;
-                subprocess_join(&subprocess, &process_return);
-                subprocess_destroy(&subprocess);
-                simdjson::dom::parser parser {};
-                auto doc = parser.parse(scan_output);
-                for (auto rule : doc["rules"])
-                {
-                    simdjson::dom::array provides {};
-                    if (rule["provides"].get(provides) != simdjson::SUCCESS)
-                    {
-                        continue;
-                    }
-                    for (auto p : provides)
-                    {
-                        std::string_view src = p["source-path"].get_string().value();
-                        std::string_view name = p["logical-name"].get_string().value();
-                        for (auto &[id, t] : graph.get_vertices())
-                        {
-                            for (const auto &sg : t.srcs)
-                            {
-                                for (const auto &tsrc : sg.srcs)
-                                {
-                                    if (tsrc.string() == src)
-                                    {
-                                        graph.get_vertex(id).src_to_mname[std::string(src)] = std::string(name);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
             auto order() -> bool
             {
                 auto result = graaf::algorithm::dfs_topological_sort(graph);
@@ -270,70 +206,6 @@ export namespace cppbuild::types
                 }
                 topo_order = std::move(result.value());
                 return true;
-            }
-            auto print_input() const -> void
-            {
-                fmt::println("=== Build Targets ({}) ===", graph.vertex_count());
-                for (const auto &[id, bt] : graph.get_vertices())
-                {
-                    fmt::println("  name: {}", bt.name);
-                    fmt::println("  deps: [{}]", fmt::join(bt.deps, ", "));
-                    fmt::println("  cxxflags: [{}]", fmt::join(bt.cxxflags, ", "));
-                    fmt::println("  cflags: [{}]", fmt::join(bt.cflags, ", "));
-                    fmt::println("  srcs ({}):", bt.srcs.size());
-                    for (const auto &sg : bt.srcs)
-                    {
-                        fmt::println("    kind: {}", sg.kind);
-                        for (const auto &src : sg.srcs)
-                        {
-                            fmt::println("      - {}", src.string());
-                        }
-                    }
-                    fmt::println("  gen_groups ({}):", bt.gen_groups.size());
-                    for (const auto &gg : bt.gen_groups)
-                    {
-                        fmt::println("    command: [{}]", fmt::join(gg.command, " "));
-                        fmt::println("    inputs ({}):", gg.inputs.size());
-                        for (const auto &inp : gg.inputs)
-                        {
-                            fmt::println("      - {}", inp.string());
-                        }
-                        fmt::println("    outputs ({}):", gg.outputs.size());
-                        for (const auto &out : gg.outputs)
-                        {
-                            fmt::println(
-                                "      - path={} kind={} module_name={}", out.path.string(), out.kind, out.module_name);
-                        }
-                    }
-                }
-                fmt::println("=== Link Targets ({}) ===", link_targets.size());
-                for (const auto &lt : link_targets)
-                {
-                    fmt::println("  name={} kind={} deps=[{}] ldflags=[{}]",
-                                 lt.name,
-                                 lt.kind,
-                                 fmt::join(lt.deps, ", "),
-                                 fmt::join(lt.ldflags, ", "));
-                }
-                fmt::println("=== Install Targets ({}) ===", install_targets.size());
-                for (const auto &it : install_targets)
-                {
-                    fmt::println("  name={} install_dir={} files=[{}]",
-                                 it.name,
-                                 it.install_dir.string(),
-                                 fmt::join(it.files, ", "));
-                }
-            }
-            auto print_modules() const -> void
-            {
-                for (const auto &[id, bt] : graph.get_vertices())
-                {
-                    fmt::println("  {} src_to_mname ({}):", bt.name, bt.src_to_mname.size());
-                    for (const auto &[src, mname] : bt.src_to_mname)
-                    {
-                        fmt::println("    {} -> {}", src, mname);
-                    }
-                }
             }
     };
 } // namespace cppbuild::types

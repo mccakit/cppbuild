@@ -29,7 +29,6 @@ struct gen_output_umka
     public:
         umkacxx::types::str_t path;
         umkacxx::types::str_t kind;
-        umkacxx::types::str_t module_name;
 };
 
 struct gen_output_cxx
@@ -37,11 +36,9 @@ struct gen_output_cxx
     public:
         std::filesystem::path path {};
         std::string kind {};
-        std::string module_name {};
 
         gen_output_cxx(const gen_output_umka &raw)
-            : path {raw.path ? raw.path : ""}, kind {raw.kind ? raw.kind : ""},
-              module_name {raw.module_name ? raw.module_name : ""}
+            : path {raw.path ? raw.path : ""}, kind {raw.kind ? raw.kind : ""}
         {
         }
 };

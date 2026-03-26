@@ -6,7 +6,6 @@ type source_files* = struct {
 type gen_output* = struct {
     path:        str
     kind:        str
-    module_name: str
 }
 
 type gen_srcs* = struct {
