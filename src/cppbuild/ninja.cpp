@@ -20,15 +20,9 @@ export namespace cppbuild
         file.print("  restat = 1\n\n");
 
         // Scan P1689 database and produce dyndep file
-        file.print("rule scan_deps\n");
-        file.print("  command = {} scan --build-dir=$build_dir\n", self_path.string());
+        file.print("rule scan_srcs\n");
+        file.print("  command = {} scan_srcs --build-dir=$build_dir\n", self_path.string());
         file.print("  description = SCAN $out\n");
-        file.print("  restat = 1\n\n");
-
-        // Generate per-source response files
-        file.print("rule rsp_gen\n");
-        file.print("  command = {} rsp_gen --build-dir=$build_dir\n", self_path.string());
-        file.print("  description = RSP GEN $out\n");
         file.print("  restat = 1\n\n");
 
         // Precompile named module to .pcm
@@ -55,10 +49,7 @@ export namespace cppbuild
         file.print("build {}/compile_commands.json: generate_p1689\n", build_dir.string());
         file.print("  build_dir = {}\n\n", build_dir.string());
 
-        file.print("build {}/deps.dd: scan_deps || {}/compile_commands.json\n", build_dir.string(), build_dir.string());
-        file.print("  build_dir = {}\n\n", build_dir.string());
-
-        file.print("build {}: rsp_gen || {}/compile_commands.json\n", fmt::join(rsp_outputs, " "), build_dir.string());
+        file.print("build {}/deps.dd: scan_srcs || {}/compile_commands.json\n", build_dir.string(), build_dir.string());
         file.print("  build_dir = {}\n\n", build_dir.string());
     }
 

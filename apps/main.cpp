@@ -2,37 +2,22 @@
 import std;
 import umkacxx;
 import cppbuild;
+import fmt;
 using CLI::App;
-
-auto split_str(const std::string &s) -> std::vector<std::string>
-{
-    std::vector<std::string> out;
-    std::istringstream ss(s);
-    std::string tok;
-    while (ss >> tok)
-        out.push_back(tok);
-    return out;
-}
 
 auto main(int argc, char **argv) -> int
 {
     App app {"cppbuild — C++ Build System"};
-
-    std::filesystem::path script_path {};
-    std::filesystem::path toolchain_path {};
-    std::filesystem::path build_dir {};
-    std::filesystem::path install_dir {};
-
     std::string script_path_in {};
     std::string toolchain_path_in {};
     std::string build_dir_in {};
     std::string install_dir_in {};
 
     // Configure Subcommand
-    auto config = app.add_subcommand("configure", "Configure the project");
-    config->add_option("-S,--script-path", script_path_in, "Path to build script");
-    config->add_option("-T,--toolchain-path", toolchain_path_in, "Compiler toolchain to use");
-    config->add_option("-B,--build-dir", build_dir_in, "Build directory");
+    auto configure = app.add_subcommand("configure", "Configure the project");
+    configure->add_option("-S,--script-path", script_path_in, "Path to build script");
+    configure->add_option("-T,--toolchain-path", toolchain_path_in, "Compiler toolchain to use");
+    configure->add_option("-B,--build-dir", build_dir_in, "Build directory");
     // Build Subcommand
     auto build = app.add_subcommand("build", "Execute build targets");
     build->add_option("-B,--build-dir", build_dir_in, "Build directory");
@@ -41,14 +26,11 @@ auto main(int argc, char **argv) -> int
     install->add_option("-B,--build-dir", build_dir_in, "Source build directory");
     install->add_option("-I,--install-dir", install_dir_in, "Installation prefix");
     // Scan Subcommand
-    auto scan = app.add_subcommand("scan", "Scan for source changes/dependencies");
-    scan->add_option("-B,--build-dir", build_dir_in, "Build directory");
+    auto scan_srcs = app.add_subcommand("scan_srcs", "Scan for source changes/dependencies");
+    scan_srcs->add_option("-B,--build-dir", build_dir_in, "Build directory");
     // Generate P1689 Subcommand
     auto gen_p1689 = app.add_subcommand("gen_p1689", "Generate P1689 database");
     gen_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
-    // Rsp Gen Subcommand
-    auto rsp_gen = app.add_subcommand("rsp_gen", "Generate per-source response files");
-    rsp_gen->add_option("-B,--build-dir", build_dir_in, "Build directory");
     try
     {
         app.parse(argc, argv);
@@ -58,11 +40,11 @@ auto main(int argc, char **argv) -> int
         return app.exit(e);
     }
 
-    if (config->parsed())
+    if (configure->parsed())
     {
-        script_path = std::filesystem::weakly_canonical(script_path_in);
-        toolchain_path = std::filesystem::weakly_canonical(toolchain_path_in);
-        build_dir = std::filesystem::weakly_canonical(build_dir_in);
+        std::filesystem::path script_path {std::filesystem::weakly_canonical(script_path_in)};
+        std::filesystem::path toolchain_path {std::filesystem::weakly_canonical(toolchain_path_in)};
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::create_directories(build_dir);
         cppbuild::types::toolchain tc {};
         tc.parse(toolchain_path);
@@ -79,33 +61,32 @@ auto main(int argc, char **argv) -> int
     }
     else if (build->parsed())
     {
-        std::println("Building from: {}", build_dir.string());
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        fmt::println("Building from: {}", build_dir.string());
     }
     else if (install->parsed())
     {
-        std::println("Installing from {} to {}", build_dir.string(), install_dir.string());
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        std::filesystem::path install_dir {std::filesystem::weakly_canonical(install_dir_in)};
+        fmt::println("Installing from {} to {}", build_dir.string(), install_dir.string());
     }
-    else if (scan->parsed())
+    else if (scan_srcs->parsed())
     {
-        build_dir = std::filesystem::weakly_canonical(build_dir_in);
-        cppbuild::generate_dyndep(build_dir.string());
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        cppbuild::types::toolchain tc {};
+        std::vector<cppbuild::types::build_target> targets {};
+        cppbuild::load_cache(build_dir / "cppbuild.cache", tc, targets);
+        auto srcs {cppbuild::scan_srcs(build_dir)};
+        cppbuild::generate_rsp(build_dir, tc, targets, srcs);
+        cppbuild::generate_dyndep(build_dir.string(), srcs);
     }
     else if (gen_p1689->parsed())
     {
-        build_dir = std::filesystem::weakly_canonical(build_dir_in);
-        cppbuild::types::toolchain tc{};
-        std::vector<cppbuild::types::build_target> targets{};
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        cppbuild::types::toolchain tc {};
+        std::vector<cppbuild::types::build_target> targets {};
         cppbuild::load_cache(build_dir / "cppbuild.cache", tc, targets);
         cppbuild::generate_p1689(build_dir, tc, targets);
     }
-    else if (rsp_gen->parsed())
-    {
-        build_dir = std::filesystem::weakly_canonical(build_dir_in);
-        cppbuild::types::toolchain tc{};
-        std::vector<cppbuild::types::build_target> targets{};
-        cppbuild::load_cache(build_dir / "cppbuild.cache", tc, targets);
-        cppbuild::generate_rsp(build_dir, tc, targets);
-    }
-
     return 0;
 }

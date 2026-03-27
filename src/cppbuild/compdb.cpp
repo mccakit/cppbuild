@@ -9,35 +9,19 @@ import :types;
 
 export namespace cppbuild
 {
-    void generate_dyndep(const std::filesystem::path &build_dir)
+    void generate_dyndep(const std::filesystem::path &build_dir, const std::string_view scan_output)
     {
-        const auto module_commands = (build_dir / "compile_commands.json").string();
-        const char *command_line[] = {
-            "clang-scan-deps", "-format=p1689", "-compilation-database", module_commands.c_str(), nullptr};
-        struct subprocess_s subprocess;
-        int options =
-            subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
-        if (subprocess_create(command_line, options, &subprocess) != 0)
-            return;
-        std::string input;
-        char buf[4096];
-        unsigned bytes_read;
-        while ((bytes_read = subprocess_read_stdout(&subprocess, buf, sizeof(buf))) != 0)
-            input.append(buf, bytes_read);
-        int process_return;
-        subprocess_join(&subprocess, &process_return);
-        subprocess_destroy(&subprocess);
-
         simdjson::dom::parser parser;
-        auto doc = parser.parse(input);
-
+        auto doc = parser.parse(scan_output);
         // Map: logical-name -> source-filename.pcm
         std::unordered_map<std::string, std::string> name_to_pcm;
         for (auto rule : doc["rules"])
         {
             simdjson::dom::array provides;
             if (rule["provides"].get(provides) != simdjson::SUCCESS)
+            {
                 continue;
+            }
             for (auto p : provides)
             {
                 std::string name = std::string(p["logical-name"].get_string().value());
@@ -69,6 +53,31 @@ export namespace cppbuild
             }
             out << "build " << pcm << ": dyndep" << (deps.empty() ? "" : " |" + deps) << "\n";
         }
+    }
+
+    auto scan_srcs(const std::filesystem::path &build_dir) -> const std::string
+    {
+        const auto module_commands = (build_dir / "compile_commands.json").string();
+        const char *command_line[] = {
+            "clang-scan-deps", "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
+        struct subprocess_s subprocess;
+        int options =
+            subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
+        if (subprocess_create(command_line, options, &subprocess) != 0)
+        {
+            return {};
+        }
+        std::string output;
+        char buf[4096];
+        unsigned bytes_read;
+        while ((bytes_read = subprocess_read_stdout(&subprocess, buf, sizeof(buf))) != 0)
+        {
+            output.append(buf, bytes_read);
+        }
+        int process_return;
+        subprocess_join(&subprocess, &process_return);
+        subprocess_destroy(&subprocess);
+        return output;
     }
 
     void generate_p1689(const std::filesystem::path &build_dir,
@@ -119,28 +128,11 @@ export namespace cppbuild
 
     void generate_rsp(const std::filesystem::path &build_dir,
                       const types::toolchain &tc,
-                      const std::vector<types::build_target> &targets)
+                      const std::vector<types::build_target> &targets,
+                      const std::string_view scan_output)
     {
-        const auto module_commands = (build_dir / "compile_commands.json").string();
-        const char *command_line[] = {
-            "clang-scan-deps", "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
-        struct subprocess_s subprocess;
-        int options =
-            subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
-        if (subprocess_create(command_line, options, &subprocess) != 0)
-            return;
-        std::string scan_output;
-        char buf[4096];
-        unsigned bytes_read;
-        while ((bytes_read = subprocess_read_stdout(&subprocess, buf, sizeof(buf))) != 0)
-            scan_output.append(buf, bytes_read);
-        int process_return;
-        subprocess_join(&subprocess, &process_return);
-        subprocess_destroy(&subprocess);
-
         simdjson::dom::parser parser;
         auto doc = parser.parse(scan_output);
-
         // Map: logical-name -> pcm path
         std::unordered_map<std::string, std::string> name_to_pcm;
         for (auto rule : doc["rules"])
