@@ -19,9 +19,7 @@ export namespace cppbuild::types
         public:
             std::filesystem::path path {};
             std::string kind {};
-            std::string module_name {};
     };
-
     struct gen_group
     {
         public:
@@ -38,7 +36,32 @@ export namespace cppbuild::types
             std::vector<std::string> deps {};
             std::vector<std::string> cxxflags {};
             std::vector<std::string> cflags {};
-            std::map<std::string, std::string> src_to_mname {};
+
+            auto print() const -> void
+            {
+                fmt::println("name: {}", name);
+                fmt::println("  deps: [{}]", fmt::join(deps, ", "));
+                fmt::println("  cxxflags: [{}]", fmt::join(cxxflags, " "));
+                fmt::println("  cflags: [{}]", fmt::join(cflags, " "));
+                fmt::println("  srcs ({}):", srcs.size());
+                for (const auto &sg : srcs)
+                {
+                    fmt::println("    kind: {}", sg.kind);
+                    for (const auto &src : sg.srcs)
+                    {
+                        fmt::println("      - {}", src.string());
+                    }
+                }
+                fmt::println("  gen_groups ({}):", gen_groups.size());
+                for (const auto &gg : gen_groups)
+                {
+                    fmt::println("    command: [{}]", fmt::join(gg.command, " "));
+                    for (const auto &out : gg.outputs)
+                    {
+                        fmt::println("      - path={} kind={}", out.path.string(), out.kind);
+                    }
+                }
+            }
     };
     struct link_target
     {
@@ -104,6 +127,17 @@ export namespace cppbuild::types
                 exe_ldflags = parse_flags(doc, "exe_ldflags");
                 shared_ldflags = parse_flags(doc, "shared_ldflags");
             }
+            auto print() const -> void
+            {
+                fmt::println("cxx_compiler:   {}", cxx_compiler);
+                fmt::println("c_compiler:     {}", c_compiler);
+                fmt::println("archiver:       {}", archiver);
+                fmt::println("cxx_scanner:    {}", cxx_scanner);
+                fmt::println("cxxflags:       {}", fmt::join(cxxflags, " "));
+                fmt::println("cflags:         {}", fmt::join(cflags, " "));
+                fmt::println("exe_ldflags:    {}", fmt::join(exe_ldflags, " "));
+                fmt::println("shared_ldflags: {}", fmt::join(shared_ldflags, " "));
+            }
     };
     class build_graph
     {
@@ -151,8 +185,7 @@ export namespace cppbuild::types
                         gg.outputs.reserve(gg_raw.outputs.size());
                         for (auto &out : gg_raw.outputs)
                         {
-                            gg.outputs.push_back({.path = build_dir / out.path,
-                                                  .kind = std::move(out.kind)});
+                            gg.outputs.push_back({.path = build_dir / out.path, .kind = std::move(out.kind)});
                         }
                         target.gen_groups.push_back(std::move(gg));
                     }

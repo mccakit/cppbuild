@@ -11,4 +11,13 @@ file(
 )
 add_library(cppbuild_lib STATIC)
 target_sources(cppbuild_lib PUBLIC FILE_SET CXX_MODULES FILES ${cppbuild_srcs})
-target_link_libraries(cppbuild_lib PUBLIC PkgConfig::SIMDJSON fmt::fmt-module PkgConfig::GRAAF PkgConfig::UMKACXX subprocess)
+target_link_libraries(
+    cppbuild_lib
+    PUBLIC
+        PkgConfig::SIMDJSON
+        fmt::fmt-module
+        PkgConfig::GRAAF
+        PkgConfig::UMKACXX
+        subprocess
+        zpp
+)
