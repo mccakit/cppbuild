@@ -9,7 +9,7 @@ import :types;
 
 export namespace cppbuild
 {
-    void generate_dyndep(const std::filesystem::path &build_dir, const std::string_view scan_output)
+    auto generate_dyndep(const std::filesystem::path &build_dir, const std::string_view scan_output) -> void
     {
         simdjson::dom::parser parser;
         auto doc = parser.parse(scan_output);
@@ -80,7 +80,7 @@ export namespace cppbuild
         return output;
     }
 
-    void generate_p1689(const std::filesystem::path &build_dir,
+    auto generate_p1689(const std::filesystem::path &build_dir,
                         const types::toolchain &tc,
                         const std::vector<types::build_target> &targets)
     {
@@ -126,10 +126,10 @@ export namespace cppbuild
         out.print("\n]\n");
     }
 
-    void generate_rsp(const std::filesystem::path &build_dir,
+    auto generate_rsp(const std::filesystem::path &build_dir,
                       const types::toolchain &tc,
                       const std::vector<types::build_target> &targets,
-                      const std::string_view scan_output)
+                      const std::string_view scan_output) -> void
     {
         simdjson::dom::parser parser;
         auto doc = parser.parse(scan_output);

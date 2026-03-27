@@ -14,12 +14,14 @@ export namespace cppbuild::types
             std::string kind {};
             std::vector<std::filesystem::path> srcs;
     };
+
     struct gen_output
     {
         public:
             std::filesystem::path path {};
             std::string kind {};
     };
+
     struct gen_group
     {
         public:
@@ -27,6 +29,7 @@ export namespace cppbuild::types
             std::vector<std::filesystem::path> inputs {};
             std::vector<gen_output> outputs {};
     };
+
     struct build_target
     {
         public:
@@ -63,6 +66,7 @@ export namespace cppbuild::types
                 }
             }
     };
+
     struct link_target
     {
         public:
@@ -71,6 +75,7 @@ export namespace cppbuild::types
             std::vector<std::string> deps {};
             std::vector<std::string> ldflags {};
     };
+
     struct install_target
     {
         public:
@@ -78,19 +83,7 @@ export namespace cppbuild::types
             std::filesystem::path install_dir {};
             std::vector<std::string> files {};
     };
-    auto parse_flags(simdjson::dom::element doc, std::string_view key) -> std::vector<std::string>
-    {
-        simdjson::dom::array arr;
-        std::vector<std::string> out;
-        if (doc[key].get(arr) == simdjson::SUCCESS)
-        {
-            for (auto f : arr)
-            {
-                out.push_back(std::string(f.get_string().value()));
-            }
-        }
-        return out;
-    }
+
     class toolchain
     {
         public:
@@ -104,6 +97,22 @@ export namespace cppbuild::types
             std::vector<std::string> shared_ldflags {};
             auto parse(const std::filesystem::path &path) -> void
             {
+                auto parse_flags = [](simdjson::dom::element doc, std::string_view key) -> std::vector<std::string> {
+                    simdjson::dom::array arr;
+                    std::vector<std::string> out;
+
+                    if (doc[key].get(arr) == simdjson::SUCCESS)
+                    {
+                        out.reserve(arr.size()); // 👈 important
+
+                        for (auto f : arr)
+                        {
+                            out.emplace_back(f.get_string().value());
+                        }
+                    }
+
+                    return out;
+                };
                 simdjson::dom::parser parser;
                 simdjson::dom::element doc = parser.load(path.string());
                 if (auto val = doc["cxx_compiler"]; val.error() == simdjson::SUCCESS)

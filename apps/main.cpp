@@ -57,7 +57,7 @@ auto main(int argc, char **argv) -> int
                                      .toolchain = tc,
                                      .build_dir = build_dir.string(),
                                      .self_path = std::filesystem::weakly_canonical(argv[0])});
-        cppbuild::save_cache(build_dir / "cppbuild.cache", tc, graph);
+        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, graph);
     }
     else if (build->parsed())
     {
@@ -73,20 +73,16 @@ auto main(int argc, char **argv) -> int
     else if (scan_srcs->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        cppbuild::types::toolchain tc {};
-        std::vector<cppbuild::types::build_target> targets {};
-        cppbuild::load_cache(build_dir / "cppbuild.cache", tc, targets);
-        auto srcs {cppbuild::scan_srcs(build_dir)};
-        cppbuild::generate_rsp(build_dir, tc, targets, srcs);
-        cppbuild::generate_dyndep(build_dir.string(), srcs);
+        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
+        auto scanner_output = cppbuild::scan_srcs(build_dir);
+        cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, scanner_output);
+        cppbuild::generate_dyndep(build_dir.string(), scanner_output);
     }
     else if (gen_p1689->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        cppbuild::types::toolchain tc {};
-        std::vector<cppbuild::types::build_target> targets {};
-        cppbuild::load_cache(build_dir / "cppbuild.cache", tc, targets);
-        cppbuild::generate_p1689(build_dir, tc, targets);
+        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
+        cppbuild::generate_p1689(build_dir, cache.tc, cache.build_targets);
     }
     return 0;
 }
