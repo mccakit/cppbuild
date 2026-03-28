@@ -50,6 +50,14 @@ export namespace cppbuild
                    toolchain.cxx_compiler);
         file.print("  description = OBJ $out\n\n");
 
+        // Compile C translation unit to .o
+        file.print("rule compile_c_translation_unit\n");
+        file.print("  command = {} -c $in -o $out $cflags\n", toolchain.c_compiler);
+        file.print("  description = OBJ $out\n\n");
+    }
+
+    auto init(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg) -> void
+    {
         // Collect rsp outputs
         std::vector<std::string> rsp_outputs;
         rsp_outputs.reserve(1024);
@@ -195,17 +203,24 @@ export namespace cppbuild
                 {
                     for (auto const &src : sg.srcs)
                     {
+                        const bool is_c = src.extension() == ".c";
                         auto obj = (build_dir / (src.filename().string() + ".o")).string();
                         auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
-                        file.print("build {}: compile_cxx_translation_unit {}{}\n", obj, src.string(), order_only);
-                        file.print("  dyndep = {}\n", dyndep);
-                        file.print("  rsp = {}\n", rsp);
-                        file.print("  cxxflags = {} {}\n",
-                                   fmt::join(toolchain.cxxflags, " "),
-                                   fmt::join(target.cxxflags, " "));
-                        if (!info.flags.empty())
-                            file.print("  header_unit_flags ={}\n", info.flags);
-                        file.print("\n");
+                        if (is_c)
+                        {
+                            file.print("build {}: compile_c_translation_unit {}\n", obj, src.string());
+                            file.print("  cflags = {} {}\n\n", fmt::join(toolchain.cflags, " "), fmt::join(target.cflags, " "));
+                        }
+                        else
+                        {
+                            file.print("build {}: compile_cxx_translation_unit {}{}\n", obj, src.string(), order_only);
+                            file.print("  dyndep = {}\n", dyndep);
+                            file.print("  rsp = {}\n", rsp);
+                            file.print("  cxxflags = {} {}\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
+                            if (!info.flags.empty())
+                                file.print("  header_unit_flags ={}\n", info.flags);
+                            file.print("\n");
+                        }
                     }
                 }
             }
@@ -226,6 +241,7 @@ export namespace cppbuild
         const auto hu_map = collect_header_unit_info(opts.graph, opts.build_dir);
         auto file = fmt::output_file((opts.build_dir / "build.ninja").string());
         rules(file, opts.toolchain, opts.self_path, opts.build_dir, opts.graph);
+        init(file, opts.build_dir, opts.graph);
         precompile_header_unit_edges(file, opts.graph, opts.build_dir, opts.toolchain);
         precompile_named_module_edges(file, opts.graph, opts.build_dir, hu_map, opts.toolchain);
         codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir, hu_map);
