@@ -9,6 +9,53 @@ import :types;
 
 export namespace cppbuild
 {
+    auto generate_p1689(const std::filesystem::path &build_dir,
+                        const types::toolchain &tc,
+                        const std::vector<types::build_target> &targets)
+    {
+        auto out = fmt::output_file((build_dir / "compile_commands.json").string());
+        const std::string cflags_str = tc.cflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cflags, " "));
+        const std::string cxxflags_str = tc.cxxflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cxxflags, " "));
+        out.print("[\n");
+        bool first = true;
+        for (const auto &bt : targets)
+        {
+            for (const auto &sg : bt.srcs)
+            {
+                if (sg.kind == "header_unit")
+                {
+                    continue;
+                }
+                for (const auto &src : sg.srcs)
+                {
+                    const bool is_c = src.extension() == ".c";
+                    const auto &compiler = is_c ? tc.c_compiler : tc.cxx_compiler;
+                    const auto &flags = is_c ? cflags_str : cxxflags_str;
+                    if (compiler.empty())
+                    {
+                        continue;
+                    }
+                    auto obj = build_dir / src.filename();
+                    obj.replace_extension(".o");
+                    if (!first)
+                    {
+                        out.print(",\n");
+                    }
+                    first = false;
+                    const auto src_str = src.string();
+                    out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\"}}",
+                              build_dir.string(),
+                              src_str,
+                              compiler.string(),
+                              flags,
+                              src_str,
+                              obj.string());
+                }
+            }
+        }
+        out.print("\n]\n");
+    }
+
     auto generate_dyndep(const std::filesystem::path &build_dir, const std::string_view scan_output) -> void
     {
         simdjson::dom::parser parser;
@@ -78,52 +125,6 @@ export namespace cppbuild
         subprocess_join(&subprocess, &process_return);
         subprocess_destroy(&subprocess);
         return output;
-    }
-
-    auto generate_p1689(const std::filesystem::path &build_dir,
-                        const types::toolchain &tc,
-                        const std::vector<types::build_target> &targets)
-    {
-        auto out = fmt::output_file((build_dir / "compile_commands.json").string());
-        out.print("[\n");
-        auto join_flags = [](const std::vector<std::string> &flags) -> std::string {
-            return flags.empty() ? "" : fmt::format("{} ", fmt::join(flags, " "));
-        };
-        const std::string cflags_str = join_flags(tc.cflags);
-        const std::string cxxflags_str = join_flags(tc.cxxflags);
-        bool first = true;
-        auto write_entry =
-            [&](const std::filesystem::path &src, const std::filesystem::path &compiler, const std::string &flags) {
-                if (compiler.empty())
-                    return;
-                auto obj = build_dir / src.filename();
-                obj.replace_extension(".o");
-                if (!first)
-                    out.print(",\n");
-                first = false;
-                const auto src_str = src.string();
-                out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\"}}",
-                          build_dir.string(),
-                          src_str,
-                          compiler.string(),
-                          flags,
-                          src_str,
-                          obj.string());
-            };
-        for (const auto &bt : targets)
-        {
-            for (const auto &sg : bt.srcs)
-            {
-                for (const auto &src : sg.srcs)
-                {
-                    if (src.extension() == ".c")
-                        write_entry(src, tc.c_compiler, cflags_str);
-                    else
-                        write_entry(src, tc.cxx_compiler, cxxflags_str);
-                }
-            }
-        }
-        out.print("\n]\n");
     }
 
     auto generate_rsp(const std::filesystem::path &build_dir,
