@@ -25,18 +25,18 @@ export namespace cppbuild
         file.print("  description = SCAN $out\n");
         file.print("  restat = 1\n\n");
 
-        // Precompile named module to .pcm
-        file.print("rule precompile_named_module\n");
-        file.print(
-            "  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out @$rsp $cxxflags\n",
-            toolchain.cxx_compiler);
-        file.print("  dyndep = $dyndep\n");
-        file.print("  description = PCM $out\n\n");
-
         // Precompile header unit to .pcm
         file.print("rule precompile_header_unit\n");
         file.print("  command = {} --precompile -fmodule-header=user -xc++-user-header $in -o $out $cxxflags\n",
                    toolchain.cxx_compiler);
+        file.print("  description = PCM $out\n\n");
+
+        // Precompile named module to .pcm
+        file.print("rule precompile_named_module\n");
+        file.print(
+            "  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out @$rsp $cxxflags $header_unit_flags\n",
+            toolchain.cxx_compiler);
+        file.print("  dyndep = $dyndep\n");
         file.print("  description = PCM $out\n\n");
 
         // Compile named module .pcm to .o
@@ -72,10 +72,10 @@ export namespace cppbuild
             }
         }
 
-        file.print("build {}/compile_commands.json: generate_p1689\n", build_dir.string());
+        file.print("build {}/p1689.json: generate_p1689\n", build_dir.string());
         file.print("  build_dir = {}\n\n", build_dir.string());
 
-        file.print("build {}/deps.dd: scan_srcs || {}/compile_commands.json\n", build_dir.string(), build_dir.string());
+        file.print("build {}/deps.dd: scan_srcs || {}/p1689.json\n", build_dir.string(), build_dir.string());
         file.print("  build_dir = {}\n\n", build_dir.string());
     }
 
@@ -148,8 +148,8 @@ export namespace cppbuild
         const auto dyndep = (build_dir / "deps.dd").string();
         for (auto id : bg.topo_order)
         {
-            const auto &target = bg.graph.get_vertex(id);
-            const auto &info = hu_map.data.at(id);
+            const auto &target    = bg.graph.get_vertex(id);
+            const auto &info      = hu_map.data.at(id);
             const auto order_only = " || " + dyndep + info.order_only;
             for (auto const &sg : target.srcs)
             {
@@ -162,9 +162,10 @@ export namespace cppbuild
                         file.print("build {}: precompile_named_module {}{}\n", pcm, src.string(), order_only);
                         file.print("  dyndep = {}\n", dyndep);
                         file.print("  rsp = {}\n", rsp);
-                        file.print("  cxxflags = {} {}\n\n",
-                                   fmt::join(toolchain.cxxflags, " "),
-                                   fmt::join(target.cxxflags, " "));
+                        file.print("  cxxflags = {} {}\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
+                        if (!info.flags.empty())
+                            file.print("  header_unit_flags ={}\n", info.flags);
+                        file.print("\n");
                     }
                 }
             }

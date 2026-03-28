@@ -13,8 +13,7 @@ export namespace cppbuild
                         const types::toolchain &tc,
                         const std::vector<types::build_target> &targets)
     {
-        auto out = fmt::output_file((build_dir / "compile_commands.json").string());
-        const std::string cflags_str = tc.cflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cflags, " "));
+        auto out = fmt::output_file((build_dir / "p1689.json").string());
         const std::string cxxflags_str = tc.cxxflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cxxflags, " "));
         out.print("[\n");
         bool first = true;
@@ -29,29 +28,96 @@ export namespace cppbuild
                 auto ext = sg.kind == "named_module" ? ".pcm.o" : ".o";
                 for (const auto &src : sg.srcs)
                 {
+                    if (src.extension() != ".c")
+                    {
+                        const auto &compiler = tc.cxx_compiler;
+                        const auto &flags = cxxflags_str;
+                        if (compiler.empty())
+                        {
+                            continue;
+                        }
+                        auto obj = build_dir / (src.filename().string() + ext);
+                        if (!first)
+                        {
+                            out.print(",\n");
+                        }
+                        first = false;
+                        const auto src_str = src.string();
+                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o "
+                                  "{}\",\"output\":\"{}\"}}",
+                                  build_dir.string(),
+                                  src_str,
+                                  compiler,
+                                  flags,
+                                  src_str,
+                                  obj.string(),
+                                  obj.string());
+                    }
+                }
+            }
+        }
+        out.print("\n]\n");
+    }
+
+    auto generate_compile_commands(const std::filesystem::path &build_dir,
+                                   const types::toolchain &tc,
+                                   const std::vector<types::build_target> &targets)
+    {
+        auto out = fmt::output_file((build_dir / "compile_commands.json").string());
+        const std::string cflags_str = tc.cflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cflags, " "));
+        const std::string cxxflags_str = tc.cxxflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cxxflags, " "));
+        out.print("[\n");
+        bool first = true;
+        for (const auto &bt : targets)
+        {
+            for (const auto &sg : bt.srcs)
+            {
+                auto ext = sg.kind == "named_module" ? ".pcm.o" : ".o";
+                for (const auto &src : sg.srcs)
+                {
                     const bool is_c = src.extension() == ".c";
+                    const bool is_header_unit = sg.kind == "header_unit";
                     const auto &compiler = is_c ? tc.c_compiler : tc.cxx_compiler;
                     const auto &flags = is_c ? cflags_str : cxxflags_str;
                     if (compiler.empty())
-                    {
                         continue;
-                    }
                     auto obj = build_dir / (src.filename().string() + ext);
+                    auto rsp = build_dir / (src.filename().string() + ".rsp");
                     if (!first)
-                    {
                         out.print(",\n");
-                    }
                     first = false;
                     const auto src_str = src.string();
-                    out.print(
-                        "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\",\"output\":\"{}\"}}",
-                        build_dir.string(),
-                        src_str,
-                        compiler,
-                        flags,
-                        src_str,
-                        obj.string(),
-                        obj.string());
+                    if (is_c)
+                    {
+                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\"}}",
+                                  build_dir.string(),
+                                  src_str,
+                                  compiler,
+                                  flags,
+                                  src_str,
+                                  obj.string());
+                    }
+                    else if (is_header_unit)
+                    {
+                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}--precompile -fmodule-header=user -xc++-user-header {} -o {}\"}}",
+                                  build_dir.string(),
+                                  src_str,
+                                  compiler,
+                                  cxxflags_str,
+                                  src_str,
+                                  (build_dir / (src.filename().string() + ".pcm")).string());
+                    }
+                    else
+                    {
+                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {} @{}\"}}",
+                                  build_dir.string(),
+                                  src_str,
+                                  compiler,
+                                  flags,
+                                  src_str,
+                                  obj.string(),
+                                  rsp.string());
+                    }
                 }
             }
         }
@@ -85,7 +151,7 @@ export namespace cppbuild
     };
     auto scan_srcs(const std::filesystem::path &build_dir) -> const std::vector<dyndep_entry>
     {
-        const auto module_commands = (build_dir / "compile_commands.json").string();
+        const auto module_commands = (build_dir / "p1689.json").string();
         const char *command_line[] = {
             "clang-scan-deps", "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
         struct subprocess_s subprocess;
@@ -107,7 +173,7 @@ export namespace cppbuild
         subprocess_destroy(&subprocess);
         simdjson::dom::parser scan_parser;
         simdjson::dom::parser db_parser;
-        std::string db_path = build_dir / "compile_commands.json";
+        std::string db_path = build_dir / "p1689.json";
         auto scan_doc = scan_parser.parse(output);
         auto compdb = db_parser.load(db_path);
 
@@ -186,16 +252,15 @@ export namespace cppbuild
         return result;
     }
 
-    auto generate_dyndep(const std::filesystem::path &build_dir,
-                         const std::vector<dyndep_entry> &entries) -> void
+    auto generate_dyndep(const std::filesystem::path &build_dir, const std::vector<dyndep_entry> &entries) -> void
     {
         std::ofstream out(build_dir / "deps.dd");
         out << "ninja_dyndep_version = 1\n";
-        for (auto const& entry : entries)
+        for (auto const &entry : entries)
         {
             auto obj = build_dir / (entry.src.source_path.filename().string() + ".o");
             std::string dep_pcms;
-            for (auto const& dep : entry.deps)
+            for (auto const &dep : entry.deps)
             {
                 auto dep_pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
                 dep_pcms += " " + dep_pcm.string();
@@ -208,8 +273,7 @@ export namespace cppbuild
             }
             else
             {
-                out << "build " << obj.string() << ": dyndep"
-                    << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
+                out << "build " << obj.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
             }
         }
     }
@@ -220,15 +284,15 @@ export namespace cppbuild
                       const std::vector<dyndep_entry> &entries) -> void
     {
         // map source path -> dyndep_entry for quick lookup
-        std::unordered_map<std::string, dyndep_entry const*> src_to_entry;
-        for (auto const& entry : entries)
+        std::unordered_map<std::string, dyndep_entry const *> src_to_entry;
+        for (auto const &entry : entries)
             src_to_entry[entry.src.source_path.string()] = &entry;
 
-        for (auto const& bt : targets)
+        for (auto const &bt : targets)
         {
-            for (auto const& sg : bt.srcs)
+            for (auto const &sg : bt.srcs)
             {
-                for (auto const& src : sg.srcs)
+                for (auto const &src : sg.srcs)
                 {
                     auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
                     if (src.extension() == ".c")
@@ -239,7 +303,7 @@ export namespace cppbuild
                     auto it = src_to_entry.find(src.string());
                     if (it == src_to_entry.end())
                         continue;
-                    for (auto const& dep : it->second->deps)
+                    for (auto const &dep : it->second->deps)
                     {
                         auto pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
                         out.print("-fmodule-file={}={}\n", dep.logical_name, pcm.string());

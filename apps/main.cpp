@@ -83,6 +83,7 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
         cppbuild::generate_p1689(build_dir, cache.tc, cache.build_targets);
+        cppbuild::generate_compile_commands(build_dir, cache.tc, cache.build_targets);
     }
     return 0;
 }
