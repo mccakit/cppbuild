@@ -115,40 +115,53 @@ export namespace cppbuild::types
             std::vector<std::string> shared_ldflags {};
             auto parse(const std::filesystem::path &path) -> void
             {
-                auto parse_flags = [](simdjson::dom::element doc, std::string_view key) -> std::vector<std::string> {
+                const auto tc_dir = std::filesystem::absolute(path).parent_path();
+
+                auto prefix_if_relative = [&](std::string_view val) -> std::string
+                {
+                    const std::filesystem::path p(val);
+                    if (p.is_absolute() || p.parent_path().empty())
+                    {
+                        return std::string(val);
+                    }
+                    return (tc_dir / p).lexically_normal().string();
+                };
+
+                auto parse_flags = [](simdjson::dom::element doc, std::string_view key) -> std::vector<std::string>
+                {
                     simdjson::dom::array arr;
                     std::vector<std::string> out;
-
                     if (doc[key].get(arr) == simdjson::SUCCESS)
                     {
                         out.reserve(arr.size());
-
                         for (auto f : arr)
                         {
                             out.emplace_back(f.get_string().value());
                         }
                     }
-
                     return out;
                 };
+
                 simdjson::dom::parser parser;
                 simdjson::dom::element doc = parser.load(path.string());
+
                 if (auto val = doc["cxx_compiler"]; val.error() == simdjson::SUCCESS)
                 {
-                    cxx_compiler = std::string(val.get_string().value());
+                    cxx_compiler = prefix_if_relative(val.get_string().value());
                 }
                 if (auto val = doc["c_compiler"]; val.error() == simdjson::SUCCESS)
                 {
-                    c_compiler = std::string(val.get_string().value());
+                    c_compiler = prefix_if_relative(val.get_string().value());
                 }
                 if (auto val = doc["archiver"]; val.error() == simdjson::SUCCESS)
                 {
-                    archiver = std::string(val.get_string().value());
+                    archiver = prefix_if_relative(val.get_string().value());
                 }
                 if (auto val = doc["cxx_scanner"]; val.error() == simdjson::SUCCESS)
                 {
-                    cxx_scanner = std::string(val.get_string().value());
+                    cxx_scanner = prefix_if_relative(val.get_string().value());
                 }
+
                 cxxflags = parse_flags(doc, "cxxflags");
                 cflags = parse_flags(doc, "cflags");
                 exe_ldflags = parse_flags(doc, "exe_ldflags");

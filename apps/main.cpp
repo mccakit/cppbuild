@@ -77,7 +77,7 @@ auto main(int argc, char **argv) -> int
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        auto scanner_output = cppbuild::scan_srcs(build_dir);
+        auto scanner_output = cppbuild::scan_srcs(build_dir, cache.tc);
         cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, scanner_output);
         cppbuild::generate_dyndep(build_dir.string(), scanner_output);
     }

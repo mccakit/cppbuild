@@ -180,7 +180,6 @@ export namespace cppbuild
     {
             std::unordered_map<graaf::vertex_id_t, header_unit_info> data {};
     };
-
     auto collect_header_unit_info(const types::build_graph &bg, const std::filesystem::path &build_dir)
         -> header_unit_info_map
     {

@@ -61,5 +61,12 @@ fn configure*(): cppbuild::results {
         kind: "shared_library",
         deps: {"target0"}
     })
+    cppbuild::add_install_target({
+        name: "default",
+        install_dir: "./install",
+        build_targets: {"target0", "target1"},
+        link_targets: {"target3", "target4", "target5"},
+        files: {"tgt1_hu.hpp", "h1.hpp"},
+    })
     return cppbuild::build_config
 }
