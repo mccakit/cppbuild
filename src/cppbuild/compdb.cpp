@@ -26,6 +26,7 @@ export namespace cppbuild
                 {
                     continue;
                 }
+                auto ext = sg.kind == "named_module" ? ".pcm.o" : ".o";
                 for (const auto &src : sg.srcs)
                 {
                     const bool is_c = src.extension() == ".c";
@@ -35,74 +36,54 @@ export namespace cppbuild
                     {
                         continue;
                     }
-                    auto obj = build_dir / src.filename();
-                    obj.replace_extension(".o");
+                    auto obj = build_dir / (src.filename().string() + ext);
                     if (!first)
                     {
                         out.print(",\n");
                     }
                     first = false;
                     const auto src_str = src.string();
-                    out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\"}}",
-                              build_dir.string(),
-                              src_str,
-                              compiler.string(),
-                              flags,
-                              src_str,
-                              obj.string());
+                    out.print(
+                        "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\",\"output\":\"{}\"}}",
+                        build_dir.string(),
+                        src_str,
+                        compiler,
+                        flags,
+                        src_str,
+                        obj.string(),
+                        obj.string());
                 }
             }
         }
         out.print("\n]\n");
     }
 
-    auto generate_dyndep(const std::filesystem::path &build_dir, const std::string_view scan_output) -> void
+    class cxx_module
     {
-        simdjson::dom::parser parser;
-        auto doc = parser.parse(scan_output);
-        // Map: logical-name -> source-filename.pcm
-        std::unordered_map<std::string, std::string> name_to_pcm;
-        for (auto rule : doc["rules"])
-        {
-            simdjson::dom::array provides;
-            if (rule["provides"].get(provides) != simdjson::SUCCESS)
+        public:
+            std::string logical_name {};
+            std::filesystem::path source_path {};
+            auto print() const -> void
             {
-                continue;
+                fmt::println("{} -> {}", logical_name, source_path.string());
             }
-            for (auto p : provides)
+    };
+    class dyndep_entry
+    {
+        public:
+            cxx_module src;
+            std::vector<cxx_module> deps;
+            auto print() const -> void
             {
-                std::string name = std::string(p["logical-name"].get_string().value());
-                std::filesystem::path src = std::string(p["source-path"].get_string().value());
-                name_to_pcm[name] = (build_dir / (src.filename().string() + ".pcm")).string();
-            }
-        }
-
-        std::ofstream out(build_dir / "deps.dd");
-        out << "ninja_dyndep_version = 1\n";
-        for (auto rule : doc["rules"])
-        {
-            simdjson::dom::array provides;
-            if (rule["provides"].get(provides) != simdjson::SUCCESS)
-                continue;
-            std::filesystem::path src = std::string(provides.at(0)["source-path"].get_string().value());
-            const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
-            std::string deps;
-            simdjson::dom::array requires_;
-            if (rule["requires"].get(requires_) == simdjson::SUCCESS)
-            {
-                for (auto r : requires_)
+                src.print();
+                for (auto const &dep : deps)
                 {
-                    std::string dep_name = std::string(r["logical-name"].get_string().value());
-                    auto it = name_to_pcm.find(dep_name);
-                    if (it != name_to_pcm.end())
-                        deps += " " + it->second;
+                    fmt::print("  ");
+                    dep.print();
                 }
             }
-            out << "build " << pcm << ": dyndep" << (deps.empty() ? "" : " |" + deps) << "\n";
-        }
-    }
-
-    auto scan_srcs(const std::filesystem::path &build_dir) -> const std::string
+    };
+    auto scan_srcs(const std::filesystem::path &build_dir) -> const std::vector<dyndep_entry>
     {
         const auto module_commands = (build_dir / "compile_commands.json").string();
         const char *command_line[] = {
@@ -124,105 +105,144 @@ export namespace cppbuild
         int process_return;
         subprocess_join(&subprocess, &process_return);
         subprocess_destroy(&subprocess);
-        return output;
+        simdjson::dom::parser scan_parser;
+        simdjson::dom::parser db_parser;
+        std::string db_path = build_dir / "compile_commands.json";
+        auto scan_doc = scan_parser.parse(output);
+        auto compdb = db_parser.load(db_path);
+
+        // index compdb by output -> file
+        std::unordered_map<std::string, std::string> output_to_file;
+        std::unordered_map<std::string, std::string> file_to_output;
+        for (auto entry : compdb)
+        {
+            std::string file = std::string(entry["file"].get_string().value());
+            std::string output = std::string(entry["output"].get_string().value());
+            output_to_file[output] = file;
+            file_to_output[file] = output;
+        }
+        graaf::directed_graph<cxx_module, int> graph;
+        std::unordered_map<std::string, graaf::vertex_id_t> id_map;
+
+        // pass 1: insert vertices
+        for (auto rule : scan_doc["rules"])
+        {
+            cxx_module src {};
+            std::string primary_output = std::string(rule["primary-output"].get_string().value());
+            auto it = output_to_file.find(primary_output);
+            if (it != output_to_file.end())
+            {
+                src.source_path = it->second;
+            }
+            simdjson::dom::array provides_arr;
+            if (!rule["provides"].get(provides_arr))
+            {
+                for (auto provides : provides_arr)
+                {
+                    src.logical_name = std::string(provides["logical-name"].get_string().value());
+                }
+            }
+
+            id_map[primary_output] = graph.add_vertex(src);
+        }
+        //
+        // pass 2: add edges
+        for (auto rule : scan_doc["rules"])
+        {
+            std::string primary_output = std::string(rule["primary-output"].get_string().value());
+            simdjson::dom::array requires_arr;
+            if (!rule["requires"].get(requires_arr))
+            {
+                for (auto req : requires_arr)
+                {
+                    std::string dep_file = std::string(req["source-path"].get_string().value());
+                    auto dep_output_it = file_to_output.find(dep_file);
+                    if (dep_output_it == file_to_output.end())
+                    {
+                        continue;
+                    }
+                    auto src_it = id_map.find(primary_output);
+                    auto dst_it = id_map.find(dep_output_it->second);
+                    if (src_it != id_map.end() && dst_it != id_map.end())
+                    {
+                        graph.add_edge(src_it->second, dst_it->second, 1);
+                    }
+                }
+            }
+        }
+        //
+        std::vector<dyndep_entry> result {};
+        for (auto const &[id, value] : graph.get_vertices())
+        {
+            dyndep_entry entry {};
+            entry.src = value;
+            graaf::algorithm::breadth_first_traverse(graph, id, [&](graaf::edge_id_t e) {
+                auto [src, dst] = e;
+                entry.deps.push_back(graph.get_vertex(dst));
+            });
+            result.push_back(std::move(entry));
+        }
+
+        return result;
+    }
+
+    auto generate_dyndep(const std::filesystem::path &build_dir,
+                         const std::vector<dyndep_entry> &entries) -> void
+    {
+        std::ofstream out(build_dir / "deps.dd");
+        out << "ninja_dyndep_version = 1\n";
+        for (auto const& entry : entries)
+        {
+            auto obj = build_dir / (entry.src.source_path.filename().string() + ".o");
+            std::string dep_pcms;
+            for (auto const& dep : entry.deps)
+            {
+                auto dep_pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
+                dep_pcms += " " + dep_pcm.string();
+            }
+            if (!entry.src.logical_name.empty())
+            {
+                auto pcm = build_dir / (entry.src.source_path.filename().string() + ".pcm");
+                out << "build " << pcm.string() << " | " << obj.string() << ": dyndep"
+                    << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
+            }
+            else
+            {
+                out << "build " << obj.string() << ": dyndep"
+                    << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
+            }
+        }
     }
 
     auto generate_rsp(const std::filesystem::path &build_dir,
                       const types::toolchain &tc,
                       const std::vector<types::build_target> &targets,
-                      const std::string_view scan_output) -> void
+                      const std::vector<dyndep_entry> &entries) -> void
     {
-        simdjson::dom::parser parser;
-        auto doc = parser.parse(scan_output);
-        // Map: logical-name -> pcm path
-        std::unordered_map<std::string, std::string> name_to_pcm;
-        for (auto rule : doc["rules"])
+        // map source path -> dyndep_entry for quick lookup
+        std::unordered_map<std::string, dyndep_entry const*> src_to_entry;
+        for (auto const& entry : entries)
+            src_to_entry[entry.src.source_path.string()] = &entry;
+
+        for (auto const& bt : targets)
         {
-            simdjson::dom::array provides;
-            if (rule["provides"].get(provides) != simdjson::SUCCESS)
-                continue;
-            for (auto p : provides)
+            for (auto const& sg : bt.srcs)
             {
-                std::string name = std::string(p["logical-name"].get_string().value());
-                std::filesystem::path src = std::string(p["source-path"].get_string().value());
-                name_to_pcm[name] = (build_dir / (src.filename().string() + ".pcm")).string();
-            }
-        }
-
-        // Map: logical-name -> direct requires, source-path -> logical-name
-        std::unordered_map<std::string, std::vector<std::string>> name_to_requires;
-        std::unordered_map<std::string, std::string> src_to_name;
-        for (auto rule : doc["rules"])
-        {
-            simdjson::dom::array provides;
-            if (rule["provides"].get(provides) != simdjson::SUCCESS)
-                continue;
-            std::string name = std::string(provides.at(0)["logical-name"].get_string().value());
-            std::string src = std::string(provides.at(0)["source-path"].get_string().value());
-            src_to_name[src] = name;
-            simdjson::dom::array requires_;
-            if (rule["requires"].get(requires_) != simdjson::SUCCESS)
-                continue;
-            for (auto r : requires_)
-                name_to_requires[name].push_back(std::string(r["logical-name"].get_string().value()));
-        }
-
-        // Build graaf directed graph for transitive dep resolution
-        std::unordered_map<std::string, graaf::vertex_id_t> name_to_vid;
-        graaf::directed_graph<std::string, int> dep_graph;
-        for (const auto &[name, _] : name_to_pcm)
-            name_to_vid[name] = dep_graph.add_vertex(name);
-        for (const auto &[name, deps] : name_to_requires)
-        {
-            auto from_it = name_to_vid.find(name);
-            if (from_it == name_to_vid.end())
-                continue;
-            for (const auto &dep : deps)
-            {
-                auto to_it = name_to_vid.find(dep);
-                if (to_it == name_to_vid.end())
-                    continue;
-                dep_graph.add_edge(from_it->second, to_it->second, 1);
-            }
-        }
-
-        // Get all transitive -fmodule-file= flags for a source file
-        auto get_transitive_flags = [&](const std::string &src) -> std::vector<std::string> {
-            std::vector<std::string> flags;
-            auto name_it = src_to_name.find(src);
-            if (name_it == src_to_name.end())
-                return flags;
-            auto vid_it = name_to_vid.find(name_it->second);
-            if (vid_it == name_to_vid.end())
-                return flags;
-            graaf::algorithm::breadth_first_traverse(dep_graph, vid_it->second, [&](const auto &edge) {
-                const auto &dep_name = dep_graph.get_vertex(edge.second);
-                auto pcm_it = name_to_pcm.find(dep_name);
-                if (pcm_it != name_to_pcm.end())
-                    flags.push_back(fmt::format("-fmodule-file={}={}", dep_name, pcm_it->second));
-            });
-            return flags;
-        };
-
-        // Write .rsp files for all sources
-        for (const auto &bt : targets)
-        {
-            for (const auto &sg : bt.srcs)
-            {
-                for (const auto &src : sg.srcs)
+                for (auto const& src : sg.srcs)
                 {
                     auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
                     if (src.extension() == ".c")
-                    {
                         out.print("{}\n", fmt::join(tc.cflags, "\n"));
-                    }
                     else
-                    {
                         out.print("{}\n", fmt::join(tc.cxxflags, "\n"));
-                    }
-                    for (const auto &flag : get_transitive_flags(src.string()))
+
+                    auto it = src_to_entry.find(src.string());
+                    if (it == src_to_entry.end())
+                        continue;
+                    for (auto const& dep : it->second->deps)
                     {
-                        out.print("{}\n", flag);
+                        auto pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
+                        out.print("-fmodule-file={}={}\n", dep.logical_name, pcm.string());
                     }
                 }
             }
