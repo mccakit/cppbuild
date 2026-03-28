@@ -7,6 +7,18 @@ import graaf;
 import :types;
 export namespace cppbuild
 {
+    auto get_target_with_deps(const types::build_graph &bg, graaf::vertex_id_t id)
+        -> std::vector<std::reference_wrapper<const types::build_target>>
+    {
+        std::vector<std::reference_wrapper<const types::build_target>> result {};
+        result.push_back(bg.graph.get_vertex(id));
+        graaf::algorithm::breadth_first_traverse(bg.graph, id, [&](graaf::edge_id_t e) {
+            auto [src, dst] = e;
+            result.push_back(bg.graph.get_vertex(dst));
+        });
+        return result;
+    }
+
     auto rules(fmt::ostream &file,
                const types::toolchain &toolchain,
                const std::filesystem::path &self_path,
@@ -157,6 +169,7 @@ export namespace cppbuild
     {
             std::unordered_map<graaf::vertex_id_t, header_unit_info> data {};
     };
+
     auto collect_header_unit_info(const types::build_graph &bg, const std::filesystem::path &build_dir)
         -> header_unit_info_map
     {
@@ -164,16 +177,18 @@ export namespace cppbuild
         for (auto id : bg.topo_order)
         {
             header_unit_info info {};
-            const auto &target = bg.graph.get_vertex(id);
-            for (auto const &sg : target.srcs)
+            for (auto const &target : get_target_with_deps(bg, id))
             {
-                if (sg.kind == "header_unit")
+                for (auto const &sg : target.get().srcs)
                 {
-                    for (auto const &src : sg.srcs)
+                    if (sg.kind == "header_unit")
                     {
-                        auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
-                        info.flags += fmt::format(" -fmodule-file={}", pcm);
-                        info.order_only += fmt::format(" {}", pcm);
+                        for (auto const &src : sg.srcs)
+                        {
+                            auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
+                            info.flags += fmt::format(" -fmodule-file={}", pcm);
+                            info.order_only += fmt::format(" {}", pcm);
+                        }
                     }
                 }
             }

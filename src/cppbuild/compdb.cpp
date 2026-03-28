@@ -65,12 +65,10 @@ export namespace cppbuild
                                    const std::vector<types::build_target> &targets)
     {
         auto out = fmt::output_file((build_dir / "compile_commands.json").string());
-        const auto base_cflags_str = fmt::format("{} ", fmt::join(tc.cflags, " "));
-        const auto base_cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
         const auto dir = build_dir.string();
         auto entries = std::vector<std::string> {};
 
-        auto add_entry = [&](const std::filesystem::path &src, const std::string &cxxflags, const std::string &cflags) {
+        auto add_entry = [&](const std::filesystem::path &src, std::string_view kind) {
             const bool is_c = src.extension() == ".c";
             const auto &compiler = is_c ? tc.c_compiler : tc.cxx_compiler;
             if (compiler.empty())
@@ -78,36 +76,28 @@ export namespace cppbuild
                 return;
             }
             const auto src_str = src.string();
-            const auto &flags = is_c ? cflags : cxxflags;
-            entries.push_back(fmt::format("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {}\"}}",
-                                          dir,
-                                          src_str,
-                                          compiler,
-                                          flags,
-                                          src_str));
+            const auto ext = kind == "named_module" ? ".pcm.o" : ".o";
+            const auto obj = (build_dir / (src.filename().string() + ext)).string();
+            const auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
+            entries.push_back(fmt::format(
+                "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} -c {} -o {} @{}\",\"output\":\"{}\"}}",
+                dir, src_str, compiler, src_str, obj, rsp, obj));
         };
 
         for (const auto &bt : targets)
         {
-            const auto cxxflags = bt.cxxflags.empty()
-                                      ? base_cxxflags_str
-                                      : fmt::format("{}{} ", base_cxxflags_str, fmt::join(bt.cxxflags, " "));
-            const auto cflags =
-                bt.cflags.empty() ? base_cflags_str : fmt::format("{}{} ", base_cflags_str, fmt::join(bt.cflags, " "));
-
             for (const auto &sg : bt.srcs)
             {
                 for (const auto &src : sg.srcs)
                 {
-                    add_entry(src, cxxflags, cflags);
+                    add_entry(src, sg.kind);
                 }
             }
-
             for (const auto &gg : bt.gen_groups)
             {
                 for (const auto &go : gg.outputs)
                 {
-                    add_entry(go.path, cxxflags, cflags);
+                    add_entry(go.path, go.kind);
                 }
             }
         }
@@ -280,30 +270,30 @@ export namespace cppbuild
             src_to_entry[entry.src.source_path.string()] = &entry;
         }
 
-        auto write_rsp = [&](const std::filesystem::path &src) {
-            auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
-            if (src.extension() == ".c")
-            {
-                out.print("{}\n", fmt::join(tc.cflags, "\n"));
-            }
-            else
-            {
-                out.print("{}\n", fmt::join(tc.cxxflags, "\n"));
-            }
-            auto it = src_to_entry.find(src.string());
-            if (it == src_to_entry.end())
-            {
-                return;
-            }
-            for (auto const &dep : it->second->deps)
-            {
-                auto pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
-                out.print("-fmodule-file={}={}\n", dep.logical_name, pcm.string());
-            }
-        };
-
         for (auto const &bt : targets)
         {
+            auto write_rsp = [&](const std::filesystem::path &src) {
+                auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
+                if (src.extension() == ".c")
+                {
+                    out.print("{}\n{}\n", fmt::join(tc.cflags, "\n"), fmt::join(bt.cflags, "\n"));
+                }
+                else
+                {
+                    out.print("{}\n{}\n", fmt::join(tc.cxxflags, "\n"), fmt::join(bt.cxxflags, "\n"));
+                }
+                auto it = src_to_entry.find(src.string());
+                if (it == src_to_entry.end())
+                {
+                    return;
+                }
+                for (auto const &dep : it->second->deps)
+                {
+                    auto pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
+                    out.print("-fmodule-file={}={}\n", dep.logical_name, pcm.string());
+                }
+            };
+
             for (auto const &sg : bt.srcs)
             {
                 for (auto const &src : sg.srcs)
@@ -311,7 +301,6 @@ export namespace cppbuild
                     write_rsp(src);
                 }
             }
-
             for (auto const &gg : bt.gen_groups)
             {
                 for (auto const &go : gg.outputs)
