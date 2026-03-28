@@ -33,9 +33,9 @@ export namespace cppbuild
 
         // Precompile named module to .pcm
         file.print("rule precompile_named_module\n");
-        file.print(
-            "  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out @$rsp $cxxflags $header_unit_flags\n",
-            toolchain.cxx_compiler);
+        file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out @$rsp "
+                   "$cxxflags $header_unit_flags\n",
+                   toolchain.cxx_compiler);
         file.print("  dyndep = $dyndep\n");
         file.print("  description = PCM $out\n\n");
 
@@ -54,28 +54,57 @@ export namespace cppbuild
         file.print("rule compile_c_translation_unit\n");
         file.print("  command = {} -c $in -o $out $cflags\n", toolchain.c_compiler);
         file.print("  description = OBJ $out\n\n");
+
+        // Generate files
+        file.print("rule generate\n");
+        file.print("  command = $cmd\n");
+        file.print("  description = GEN $out\n\n");
+    }
+
+    auto generate_edges(fmt::ostream &file, const types::build_graph &bg) -> void
+    {
+        for (auto id : bg.topo_order)
+        {
+            const auto &target = bg.graph.get_vertex(id);
+            for (const auto &gg : target.gen_groups)
+            {
+                std::vector<std::string> all_inputs;
+                for (const auto &inp : gg.inputs)
+                {
+                    all_inputs.push_back(inp.string());
+                }
+                std::vector<std::string> all_outputs;
+                for (const auto &out : gg.outputs)
+                {
+                    all_outputs.push_back(out.path.string());
+                }
+                file.print("build {}: generate {}\n", fmt::join(all_outputs, " "), fmt::join(all_inputs, " "));
+                file.print("  cmd = {}\n\n", fmt::join(gg.command, " "));
+            }
+        }
+    }
+
+    auto collect_gen_outputs(const types::build_graph &bg) -> std::vector<std::string>
+    {
+        std::vector<std::string> outputs;
+        for (auto const &[id, bt] : bg.graph.get_vertices())
+            for (auto const &gg : bt.gen_groups)
+                for (auto const &out : gg.outputs)
+                    outputs.push_back(out.path.string());
+        return outputs;
     }
 
     auto init(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg) -> void
     {
-        // Collect rsp outputs
-        std::vector<std::string> rsp_outputs;
-        rsp_outputs.reserve(1024);
-        for (const auto &[id, bt] : bg.graph.get_vertices())
-        {
-            for (const auto &sg : bt.srcs)
-            {
-                for (const auto &src : sg.srcs)
-                {
-                    rsp_outputs.push_back((build_dir / (src.filename().string() + ".rsp")).string());
-                }
-            }
-        }
-
         file.print("build {}/p1689.json: generate_p1689\n", build_dir.string());
         file.print("  build_dir = {}\n\n", build_dir.string());
 
-        file.print("build {}/deps.dd: scan_srcs || {}/p1689.json\n", build_dir.string(), build_dir.string());
+        const auto gen_outputs = collect_gen_outputs(bg);
+        std::string order_only = fmt::format(" || {}/p1689.json", build_dir.string());
+        if (!gen_outputs.empty())
+            order_only += fmt::format(" {}", fmt::join(gen_outputs, " "));
+
+        file.print("build {}/deps.dd: scan_srcs{}\n", build_dir.string(), order_only);
         file.print("  build_dir = {}\n\n", build_dir.string());
     }
 
@@ -87,18 +116,32 @@ export namespace cppbuild
         for (auto id : bg.topo_order)
         {
             const auto &target = bg.graph.get_vertex(id);
+
+            auto write_edge = [&](const std::filesystem::path &src) {
+                const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
+                file.print("build {}: precompile_header_unit {}\n", pcm, src.string());
+                file.print("  cxxflags = {} {}\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
+                file.print("\n");
+            };
+
             for (auto const &sg : target.srcs)
             {
                 if (sg.kind == "header_unit")
                 {
                     for (auto const &src : sg.srcs)
                     {
-                        const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
-                        file.print("build {}: precompile_header_unit {}\n", pcm, src.string());
-                        file.print("  cxxflags = {} {}\n",
-                                   fmt::join(toolchain.cxxflags, " "),
-                                   fmt::join(target.cxxflags, " "));
-                        file.print("\n");
+                        write_edge(src);
+                    }
+                }
+            }
+
+            for (auto const &gg : target.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.kind == "header_unit")
+                    {
+                        write_edge(go.path);
                     }
                 }
             }
@@ -148,24 +191,42 @@ export namespace cppbuild
         const auto dyndep = (build_dir / "deps.dd").string();
         for (auto id : bg.topo_order)
         {
-            const auto &target    = bg.graph.get_vertex(id);
-            const auto &info      = hu_map.data.at(id);
+            const auto &target = bg.graph.get_vertex(id);
+            const auto &info = hu_map.data.at(id);
             const auto order_only = " || " + dyndep + info.order_only;
+
+            auto write_edge = [&](const std::filesystem::path &src) {
+                const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
+                const auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
+                file.print("build {}: precompile_named_module {}{}\n", pcm, src.string(), order_only);
+                file.print("  dyndep = {}\n", dyndep);
+                file.print("  rsp = {}\n", rsp);
+                file.print("  cxxflags = {} {}\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
+                if (!info.flags.empty())
+                {
+                    file.print("  header_unit_flags ={}\n", info.flags);
+                }
+                file.print("\n");
+            };
+
             for (auto const &sg : target.srcs)
             {
                 if (sg.kind == "named_module")
                 {
                     for (auto const &src : sg.srcs)
                     {
-                        const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
-                        const auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
-                        file.print("build {}: precompile_named_module {}{}\n", pcm, src.string(), order_only);
-                        file.print("  dyndep = {}\n", dyndep);
-                        file.print("  rsp = {}\n", rsp);
-                        file.print("  cxxflags = {} {}\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
-                        if (!info.flags.empty())
-                            file.print("  header_unit_flags ={}\n", info.flags);
-                        file.print("\n");
+                        write_edge(src);
+                    }
+                }
+            }
+
+            for (auto const &gg : target.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.kind == "named_module")
+                    {
+                        write_edge(go.path);
                     }
                 }
             }
@@ -184,44 +245,70 @@ export namespace cppbuild
             const auto &target = bg.graph.get_vertex(id);
             const auto &info = hu_map.data.at(id);
             const auto order_only = " || " + dyndep + info.order_only;
+
+            auto write_named_module = [&](const std::filesystem::path &src) {
+                auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
+                auto obj = (build_dir / (src.filename().string() + ".pcm.o")).string();
+                auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
+                file.print("build {}: compile_named_module {}\n", obj, pcm);
+                file.print("  rsp = {}\n", rsp);
+                file.print(
+                    "  cxxflags = {} {}\n\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
+            };
+
+            auto write_translation_unit = [&](const std::filesystem::path &src) {
+                const bool is_c = src.extension() == ".c";
+                auto obj = (build_dir / (src.filename().string() + ".o")).string();
+                auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
+                if (is_c)
+                {
+                    file.print("build {}: compile_c_translation_unit {}\n", obj, src.string());
+                    file.print("  cflags = {} {}\n\n", fmt::join(toolchain.cflags, " "), fmt::join(target.cflags, " "));
+                }
+                else
+                {
+                    file.print("build {}: compile_cxx_translation_unit {}{}\n", obj, src.string(), order_only);
+                    file.print("  dyndep = {}\n", dyndep);
+                    file.print("  rsp = {}\n", rsp);
+                    file.print(
+                        "  cxxflags = {} {}\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
+                    if (!info.flags.empty())
+                    {
+                        file.print("  header_unit_flags ={}\n", info.flags);
+                    }
+                    file.print("\n");
+                }
+            };
+
             for (auto const &sg : target.srcs)
             {
                 if (sg.kind == "named_module")
                 {
                     for (auto const &src : sg.srcs)
                     {
-                        auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
-                        auto obj = (build_dir / (src.filename().string() + ".pcm.o")).string();
-                        auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
-                        file.print("build {}: compile_named_module {}\n", obj, pcm);
-                        file.print("  rsp = {}\n", rsp);
-                        file.print("  cxxflags = {} {}\n\n",
-                                   fmt::join(toolchain.cxxflags, " "),
-                                   fmt::join(target.cxxflags, " "));
+                        write_named_module(src);
                     }
                 }
                 else if (sg.kind == "translation_unit")
                 {
                     for (auto const &src : sg.srcs)
                     {
-                        const bool is_c = src.extension() == ".c";
-                        auto obj = (build_dir / (src.filename().string() + ".o")).string();
-                        auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
-                        if (is_c)
-                        {
-                            file.print("build {}: compile_c_translation_unit {}\n", obj, src.string());
-                            file.print("  cflags = {} {}\n\n", fmt::join(toolchain.cflags, " "), fmt::join(target.cflags, " "));
-                        }
-                        else
-                        {
-                            file.print("build {}: compile_cxx_translation_unit {}{}\n", obj, src.string(), order_only);
-                            file.print("  dyndep = {}\n", dyndep);
-                            file.print("  rsp = {}\n", rsp);
-                            file.print("  cxxflags = {} {}\n", fmt::join(toolchain.cxxflags, " "), fmt::join(target.cxxflags, " "));
-                            if (!info.flags.empty())
-                                file.print("  header_unit_flags ={}\n", info.flags);
-                            file.print("\n");
-                        }
+                        write_translation_unit(src);
+                    }
+                }
+            }
+
+            for (auto const &gg : target.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.kind == "named_module")
+                    {
+                        write_named_module(go.path);
+                    }
+                    else if (go.kind == "translation_unit")
+                    {
+                        write_translation_unit(go.path);
                     }
                 }
             }
@@ -242,6 +329,7 @@ export namespace cppbuild
         const auto hu_map = collect_header_unit_info(opts.graph, opts.build_dir);
         auto file = fmt::output_file((opts.build_dir / "build.ninja").string());
         rules(file, opts.toolchain, opts.self_path, opts.build_dir, opts.graph);
+        generate_edges(file, opts.graph);
         init(file, opts.build_dir, opts.graph);
         precompile_header_unit_edges(file, opts.graph, opts.build_dir, opts.toolchain);
         precompile_named_module_edges(file, opts.graph, opts.build_dir, hu_map, opts.toolchain);

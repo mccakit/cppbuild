@@ -14,49 +14,50 @@ export namespace cppbuild
                         const std::vector<types::build_target> &targets)
     {
         auto out = fmt::output_file((build_dir / "p1689.json").string());
-        const std::string cxxflags_str = tc.cxxflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cxxflags, " "));
-        out.print("[\n");
-        bool first = true;
+        const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
+        const auto dir = build_dir.string();
+        auto entries = std::vector<std::string> {};
+
+        auto add_entry = [&](const std::filesystem::path &src, std::string_view kind, const std::string &flags) {
+            if (kind == "header_unit" || src.extension() == ".c")
+            {
+                return;
+            }
+            const auto ext = kind == "named_module" ? ".pcm.o" : ".o";
+            const auto src_str = src.string();
+            const auto obj = (build_dir / (src.filename().string() + ext)).string();
+            entries.push_back(fmt::format(
+                "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\",\"output\":\"{}\"}}",
+                dir,
+                src_str,
+                tc.cxx_compiler,
+                flags,
+                src_str,
+                obj,
+                obj));
+        };
+
         for (const auto &bt : targets)
         {
+            const auto flags =
+                bt.cxxflags.empty() ? cxxflags_str : fmt::format("{}{} ", cxxflags_str, fmt::join(bt.cxxflags, " "));
             for (const auto &sg : bt.srcs)
             {
-                if (sg.kind == "header_unit")
-                {
-                    continue;
-                }
-                auto ext = sg.kind == "named_module" ? ".pcm.o" : ".o";
                 for (const auto &src : sg.srcs)
                 {
-                    if (src.extension() != ".c")
-                    {
-                        const auto &compiler = tc.cxx_compiler;
-                        const auto &flags = cxxflags_str;
-                        if (compiler.empty())
-                        {
-                            continue;
-                        }
-                        auto obj = build_dir / (src.filename().string() + ext);
-                        if (!first)
-                        {
-                            out.print(",\n");
-                        }
-                        first = false;
-                        const auto src_str = src.string();
-                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o "
-                                  "{}\",\"output\":\"{}\"}}",
-                                  build_dir.string(),
-                                  src_str,
-                                  compiler,
-                                  flags,
-                                  src_str,
-                                  obj.string(),
-                                  obj.string());
-                    }
+                    add_entry(src, sg.kind, flags);
+                }
+            }
+            for (const auto &gg : bt.gen_groups)
+            {
+                for (const auto &go : gg.outputs)
+                {
+                    add_entry(go.path, go.kind, flags);
                 }
             }
         }
-        out.print("\n]\n");
+
+        out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
     auto generate_compile_commands(const std::filesystem::path &build_dir,
@@ -64,64 +65,54 @@ export namespace cppbuild
                                    const std::vector<types::build_target> &targets)
     {
         auto out = fmt::output_file((build_dir / "compile_commands.json").string());
-        const std::string cflags_str = tc.cflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cflags, " "));
-        const std::string cxxflags_str = tc.cxxflags.empty() ? "" : fmt::format("{} ", fmt::join(tc.cxxflags, " "));
-        out.print("[\n");
-        bool first = true;
+        const auto base_cflags_str = fmt::format("{} ", fmt::join(tc.cflags, " "));
+        const auto base_cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
+        const auto dir = build_dir.string();
+        auto entries = std::vector<std::string> {};
+
+        auto add_entry = [&](const std::filesystem::path &src, const std::string &cxxflags, const std::string &cflags) {
+            const bool is_c = src.extension() == ".c";
+            const auto &compiler = is_c ? tc.c_compiler : tc.cxx_compiler;
+            if (compiler.empty())
+            {
+                return;
+            }
+            const auto src_str = src.string();
+            const auto &flags = is_c ? cflags : cxxflags;
+            entries.push_back(fmt::format("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {}\"}}",
+                                          dir,
+                                          src_str,
+                                          compiler,
+                                          flags,
+                                          src_str));
+        };
+
         for (const auto &bt : targets)
         {
+            const auto cxxflags = bt.cxxflags.empty()
+                                      ? base_cxxflags_str
+                                      : fmt::format("{}{} ", base_cxxflags_str, fmt::join(bt.cxxflags, " "));
+            const auto cflags =
+                bt.cflags.empty() ? base_cflags_str : fmt::format("{}{} ", base_cflags_str, fmt::join(bt.cflags, " "));
+
             for (const auto &sg : bt.srcs)
             {
-                auto ext = sg.kind == "named_module" ? ".pcm.o" : ".o";
                 for (const auto &src : sg.srcs)
                 {
-                    const bool is_c = src.extension() == ".c";
-                    const bool is_header_unit = sg.kind == "header_unit";
-                    const auto &compiler = is_c ? tc.c_compiler : tc.cxx_compiler;
-                    const auto &flags = is_c ? cflags_str : cxxflags_str;
-                    if (compiler.empty())
-                        continue;
-                    auto obj = build_dir / (src.filename().string() + ext);
-                    auto rsp = build_dir / (src.filename().string() + ".rsp");
-                    if (!first)
-                        out.print(",\n");
-                    first = false;
-                    const auto src_str = src.string();
-                    if (is_c)
-                    {
-                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {}\"}}",
-                                  build_dir.string(),
-                                  src_str,
-                                  compiler,
-                                  flags,
-                                  src_str,
-                                  obj.string());
-                    }
-                    else if (is_header_unit)
-                    {
-                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}--precompile -fmodule-header=user -xc++-user-header {} -o {}\"}}",
-                                  build_dir.string(),
-                                  src_str,
-                                  compiler,
-                                  cxxflags_str,
-                                  src_str,
-                                  (build_dir / (src.filename().string() + ".pcm")).string());
-                    }
-                    else
-                    {
-                        out.print("  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {}-c {} -o {} @{}\"}}",
-                                  build_dir.string(),
-                                  src_str,
-                                  compiler,
-                                  flags,
-                                  src_str,
-                                  obj.string(),
-                                  rsp.string());
-                    }
+                    add_entry(src, cxxflags, cflags);
+                }
+            }
+
+            for (const auto &gg : bt.gen_groups)
+            {
+                for (const auto &go : gg.outputs)
+                {
+                    add_entry(go.path, cxxflags, cflags);
                 }
             }
         }
-        out.print("\n]\n");
+
+        out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
     class cxx_module
@@ -283,10 +274,33 @@ export namespace cppbuild
                       const std::vector<types::build_target> &targets,
                       const std::vector<dyndep_entry> &entries) -> void
     {
-        // map source path -> dyndep_entry for quick lookup
         std::unordered_map<std::string, dyndep_entry const *> src_to_entry;
         for (auto const &entry : entries)
+        {
             src_to_entry[entry.src.source_path.string()] = &entry;
+        }
+
+        auto write_rsp = [&](const std::filesystem::path &src) {
+            auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
+            if (src.extension() == ".c")
+            {
+                out.print("{}\n", fmt::join(tc.cflags, "\n"));
+            }
+            else
+            {
+                out.print("{}\n", fmt::join(tc.cxxflags, "\n"));
+            }
+            auto it = src_to_entry.find(src.string());
+            if (it == src_to_entry.end())
+            {
+                return;
+            }
+            for (auto const &dep : it->second->deps)
+            {
+                auto pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
+                out.print("-fmodule-file={}={}\n", dep.logical_name, pcm.string());
+            }
+        };
 
         for (auto const &bt : targets)
         {
@@ -294,19 +308,17 @@ export namespace cppbuild
             {
                 for (auto const &src : sg.srcs)
                 {
-                    auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
-                    if (src.extension() == ".c")
-                        out.print("{}\n", fmt::join(tc.cflags, "\n"));
-                    else
-                        out.print("{}\n", fmt::join(tc.cxxflags, "\n"));
+                    write_rsp(src);
+                }
+            }
 
-                    auto it = src_to_entry.find(src.string());
-                    if (it == src_to_entry.end())
-                        continue;
-                    for (auto const &dep : it->second->deps)
+            for (auto const &gg : bt.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.kind != "header_unit")
                     {
-                        auto pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
-                        out.print("-fmodule-file={}={}\n", dep.logical_name, pcm.string());
+                        write_rsp(go.path);
                     }
                 }
             }
