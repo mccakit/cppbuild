@@ -39,8 +39,10 @@ export namespace cppbuild
 
         for (const auto &bt : targets)
         {
-            const auto flags =
-                bt.cxxflags.empty() ? cxxflags_str : fmt::format("{}{} ", cxxflags_str, fmt::join(bt.cxxflags, " "));
+            const auto flags = fmt::format("{} {} {} ",
+                                           cxxflags_str,
+                                           fmt::join(bt.cxxflags.public_, " "),
+                                           fmt::join(bt.cxxflags.private_, " "));
             for (const auto &sg : bt.srcs)
             {
                 for (const auto &src : sg.srcs)
@@ -115,6 +117,7 @@ export namespace cppbuild
                 fmt::println("{} -> {}", logical_name, source_path.string());
             }
     };
+
     class dyndep_entry
     {
         public:
@@ -130,6 +133,7 @@ export namespace cppbuild
                 }
             }
     };
+
     auto scan_srcs(const std::filesystem::path &build_dir) -> const std::vector<dyndep_entry>
     {
         const auto module_commands = (build_dir / "p1689.json").string();
@@ -152,22 +156,23 @@ export namespace cppbuild
         int process_return;
         subprocess_join(&subprocess, &process_return);
         subprocess_destroy(&subprocess);
+
         simdjson::dom::parser scan_parser;
         simdjson::dom::parser db_parser;
         std::string db_path = build_dir / "p1689.json";
         auto scan_doc = scan_parser.parse(output);
         auto compdb = db_parser.load(db_path);
 
-        // index compdb by output -> file
         std::unordered_map<std::string, std::string> output_to_file;
         std::unordered_map<std::string, std::string> file_to_output;
         for (auto entry : compdb)
         {
             std::string file = std::string(entry["file"].get_string().value());
-            std::string output = std::string(entry["output"].get_string().value());
-            output_to_file[output] = file;
-            file_to_output[file] = output;
+            std::string out = std::string(entry["output"].get_string().value());
+            output_to_file[out] = file;
+            file_to_output[file] = out;
         }
+
         graaf::directed_graph<cxx_module, int> graph;
         std::unordered_map<std::string, graaf::vertex_id_t> id_map;
 
@@ -176,23 +181,33 @@ export namespace cppbuild
         {
             cxx_module src {};
             std::string primary_output = std::string(rule["primary-output"].get_string().value());
-            auto it = output_to_file.find(primary_output);
-            if (it != output_to_file.end())
-            {
-                src.source_path = it->second;
-            }
+
             simdjson::dom::array provides_arr;
             if (!rule["provides"].get(provides_arr))
             {
                 for (auto provides : provides_arr)
                 {
                     src.logical_name = std::string(provides["logical-name"].get_string().value());
+                    std::string_view sp;
+                    if (provides["source-path"].get(sp) == simdjson::SUCCESS)
+                    {
+                        src.source_path = std::string(sp);
+                    }
+                }
+            }
+
+            if (src.source_path.empty())
+            {
+                auto it = output_to_file.find(primary_output);
+                if (it != output_to_file.end())
+                {
+                    src.source_path = it->second;
                 }
             }
 
             id_map[primary_output] = graph.add_vertex(src);
         }
-        //
+
         // pass 2: add edges
         for (auto rule : scan_doc["rules"])
         {
@@ -217,7 +232,7 @@ export namespace cppbuild
                 }
             }
         }
-        //
+
         std::vector<dyndep_entry> result {};
         for (auto const &[id, value] : graph.get_vertices())
         {
@@ -276,11 +291,17 @@ export namespace cppbuild
                 auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
                 if (src.extension() == ".c")
                 {
-                    out.print("{}\n{}\n", fmt::join(tc.cflags, "\n"), fmt::join(bt.cflags, "\n"));
+                    out.print("{}\n{}\n{}\n",
+                              fmt::join(tc.cflags, "\n"),
+                              fmt::join(bt.cflags.public_, "\n"),
+                              fmt::join(bt.cflags.private_, "\n"));
                 }
                 else
                 {
-                    out.print("{}\n{}\n", fmt::join(tc.cxxflags, "\n"), fmt::join(bt.cxxflags, "\n"));
+                    out.print("{}\n{}\n{}\n",
+                              fmt::join(tc.cxxflags, "\n"),
+                              fmt::join(bt.cxxflags.public_, "\n"),
+                              fmt::join(bt.cxxflags.private_, "\n"));
                 }
                 auto it = src_to_entry.find(src.string());
                 if (it == src_to_entry.end())

@@ -30,6 +30,20 @@ export namespace cppbuild::types
             std::vector<gen_output> outputs {};
     };
 
+    struct cxx_flags
+    {
+        public:
+            std::vector<std::string> public_ {};
+            std::vector<std::string> private_ {};
+    };
+
+    struct c_flags
+    {
+        public:
+            std::vector<std::string> public_ {};
+            std::vector<std::string> private_ {};
+    };
+
     struct build_target
     {
         public:
@@ -37,15 +51,17 @@ export namespace cppbuild::types
             std::vector<source_group> srcs {};
             std::vector<gen_group> gen_groups {};
             std::vector<std::string> deps {};
-            std::vector<std::string> cxxflags {};
-            std::vector<std::string> cflags {};
+            cxx_flags cxxflags {};
+            c_flags cflags {};
 
             auto print() const -> void
             {
                 fmt::println("name: {}", name);
                 fmt::println("  deps: [{}]", fmt::join(deps, ", "));
-                fmt::println("  cxxflags: [{}]", fmt::join(cxxflags, " "));
-                fmt::println("  cflags: [{}]", fmt::join(cflags, " "));
+                fmt::println("  cxxflags.public:  [{}]", fmt::join(cxxflags.public_, " "));
+                fmt::println("  cxxflags.private: [{}]", fmt::join(cxxflags.private_, " "));
+                fmt::println("  cflags.public:    [{}]", fmt::join(cflags.public_, " "));
+                fmt::println("  cflags.private:   [{}]", fmt::join(cflags.private_, " "));
                 fmt::println("  srcs ({}):", srcs.size());
                 for (const auto &sg : srcs)
                 {
@@ -103,7 +119,7 @@ export namespace cppbuild::types
 
                     if (doc[key].get(arr) == simdjson::SUCCESS)
                     {
-                        out.reserve(arr.size()); // 👈 important
+                        out.reserve(arr.size());
 
                         for (auto f : arr)
                         {
@@ -148,6 +164,7 @@ export namespace cppbuild::types
                 fmt::println("shared_ldflags: {}", fmt::join(shared_ldflags, " "));
             }
     };
+
     class build_graph
     {
         public:
@@ -168,8 +185,10 @@ export namespace cppbuild::types
                 {
                     types::build_target target {.name = std::move(bt_raw.name),
                                                 .deps = std::move(bt_raw.deps),
-                                                .cxxflags = std::move(bt_raw.cxxflags),
-                                                .cflags = std::move(bt_raw.cflags)};
+                                                .cxxflags = {.public_ = std::move(bt_raw.cxxflags.public_),
+                                                             .private_ = std::move(bt_raw.cxxflags.private_)},
+                                                .cflags = {.public_ = std::move(bt_raw.cflags.public_),
+                                                           .private_ = std::move(bt_raw.cflags.private_)}};
                     target.srcs.reserve(bt_raw.srcs.size());
                     for (auto &sg_raw : bt_raw.srcs)
                     {

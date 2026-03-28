@@ -14,13 +14,22 @@ type gen_srcs* = struct {
     outputs: []gen_output
 }
 
+type cxx_flags* = struct {
+    public:  []str
+    private: []str
+}
+type c_flags* = struct {
+    public:  []str
+    private: []str
+}
+
 type build_target* = struct {
     name:     str
     srcs:     []source_files
     gen_groups: []gen_srcs
     deps:     []str
-    cxxflags: []str
-    cflags:   []str
+    cxxflags: cxx_flags
+    cflags:   c_flags
 }
 
 type link_target* = struct {

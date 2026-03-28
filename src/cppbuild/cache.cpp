@@ -93,6 +93,40 @@ export namespace cppbuild::cache
             }
     };
 
+    class cxx_flags
+    {
+        public:
+            std::vector<std::string> public_ {};
+            std::vector<std::string> private_ {};
+
+            cxx_flags() = default;
+            cxx_flags(const types::cxx_flags &f) : public_(f.public_), private_(f.private_)
+            {
+            }
+
+            auto process() const -> types::cxx_flags
+            {
+                return {.public_ = public_, .private_ = private_};
+            }
+    };
+
+    class c_flags
+    {
+        public:
+            std::vector<std::string> public_ {};
+            std::vector<std::string> private_ {};
+
+            c_flags() = default;
+            c_flags(const types::c_flags &f) : public_(f.public_), private_(f.private_)
+            {
+            }
+
+            auto process() const -> types::c_flags
+            {
+                return {.public_ = public_, .private_ = private_};
+            }
+    };
+
     class build_target
     {
         public:
@@ -100,8 +134,8 @@ export namespace cppbuild::cache
             std::vector<source_group> srcs {};
             std::vector<gen_group> gen_groups {};
             std::vector<std::string> deps {};
-            std::vector<std::string> cxxflags {};
-            std::vector<std::string> cflags {};
+            cxx_flags cxxflags {};
+            c_flags cflags {};
 
             build_target() = default;
             build_target(const types::build_target &bt)
@@ -124,8 +158,8 @@ export namespace cppbuild::cache
                 types::build_target bt;
                 bt.name = name;
                 bt.deps = deps;
-                bt.cxxflags = cxxflags;
-                bt.cflags = cflags;
+                bt.cxxflags = cxxflags.process();
+                bt.cflags = cflags.process();
                 bt.srcs.reserve(srcs.size());
                 for (const auto &csg : srcs)
                 {

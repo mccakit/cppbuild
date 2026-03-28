@@ -37,8 +37,7 @@ struct gen_output_cxx
         std::filesystem::path path {};
         std::string kind {};
 
-        gen_output_cxx(const gen_output_umka &raw)
-            : path {raw.path ? raw.path : ""}, kind {raw.kind ? raw.kind : ""}
+        gen_output_cxx(const gen_output_umka &raw) : path {raw.path ? raw.path : ""}, kind {raw.kind ? raw.kind : ""}
         {
         }
 };
@@ -71,6 +70,46 @@ struct gen_src_cxx
         }
 };
 
+struct cxx_flags_umka
+{
+    public:
+        umkacxx::types::arr_t<umkacxx::types::str_t> public_;
+        umkacxx::types::arr_t<umkacxx::types::str_t> private_;
+};
+
+struct cxx_flags_cxx
+{
+    public:
+        std::vector<std::string> public_ {};
+        std::vector<std::string> private_ {};
+        cxx_flags_cxx() = default;
+        cxx_flags_cxx(const cxx_flags_umka &raw)
+            : public_ {raw.public_.data, raw.public_.data + raw.public_.len()},
+              private_ {raw.private_.data, raw.private_.data + raw.private_.len()}
+        {
+        }
+};
+
+struct c_flags_umka
+{
+    public:
+        umkacxx::types::arr_t<umkacxx::types::str_t> public_;
+        umkacxx::types::arr_t<umkacxx::types::str_t> private_;
+};
+
+struct c_flags_cxx
+{
+    public:
+        std::vector<std::string> public_ {};
+        std::vector<std::string> private_ {};
+        c_flags_cxx() = default;
+        c_flags_cxx(const c_flags_umka &raw)
+            : public_ {raw.public_.data, raw.public_.data + raw.public_.len()},
+              private_ {raw.private_.data, raw.private_.data + raw.private_.len()}
+        {
+        }
+};
+
 struct build_target_umka
 {
     public:
@@ -78,8 +117,8 @@ struct build_target_umka
         umkacxx::types::arr_t<source_files_umka> srcs;
         umkacxx::types::arr_t<gen_src_umka> gen_groups;
         umkacxx::types::arr_t<umkacxx::types::str_t> deps;
-        umkacxx::types::arr_t<umkacxx::types::str_t> cxxflags;
-        umkacxx::types::arr_t<umkacxx::types::str_t> cflags;
+        cxx_flags_umka cxxflags;
+        c_flags_umka cflags;
 };
 
 struct build_target_cxx
@@ -89,13 +128,12 @@ struct build_target_cxx
         std::vector<source_files_cxx> srcs {};
         std::vector<gen_src_cxx> gen_groups {};
         std::vector<std::string> deps {};
-        std::vector<std::string> cxxflags {};
-        std::vector<std::string> cflags {};
+        cxx_flags_cxx cxxflags {};
+        c_flags_cxx cflags {};
 
         build_target_cxx(const build_target_umka &raw)
             : name {raw.name ? raw.name : ""}, deps {raw.deps.data, raw.deps.data + raw.deps.len()},
-              cxxflags {raw.cxxflags.data, raw.cxxflags.data + raw.cxxflags.len()},
-              cflags {raw.cflags.data, raw.cflags.data + raw.cflags.len()}
+              cxxflags {raw.cxxflags}, cflags {raw.cflags}
         {
             auto slen = raw.srcs.len();
             srcs.reserve(slen);
