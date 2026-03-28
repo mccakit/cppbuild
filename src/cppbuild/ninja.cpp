@@ -410,7 +410,89 @@ export namespace cppbuild
         }
     }
 
-    struct write_ninja_options
+    auto install_edges(fmt::ostream &file,
+                       const types::build_graph &bg,
+                       const std::filesystem::path &build_dir,
+                       const std::filesystem::path &prefix) -> void
+    {
+        std::vector<std::string> all_installed;
+        for (const auto &it : bg.install_targets)
+        {
+            const auto dst_base = prefix / it.install_dir;
+            for (const auto &f : it.files)
+            {
+                auto dst = dst_base / std::filesystem::path(f).filename();
+                file.print("build {}: install_file {}\n\n", dst.string(), f);
+                all_installed.push_back(dst.string());
+            }
+            for (const auto &lt_name : it.link_targets)
+            {
+                auto lt_it = std::find_if(
+                    bg.link_targets.begin(), bg.link_targets.end(), [&](const auto &lt) { return lt.name == lt_name; });
+                if (lt_it == bg.link_targets.end())
+                {
+                    continue;
+                }
+                std::filesystem::path src;
+                if (lt_it->kind == "executable")
+                {
+                    src = build_dir / lt_it->name;
+                }
+                else if (lt_it->kind == "shared_library")
+                {
+                    src = build_dir / ("lib" + lt_it->name + ".so");
+                }
+                else if (lt_it->kind == "static_library")
+                {
+                    src = build_dir / ("lib" + lt_it->name + ".a");
+                }
+                auto dst = dst_base / src.filename();
+                file.print("build {}: install_file {}\n\n", dst.string(), src.string());
+                all_installed.push_back(dst.string());
+            }
+            for (const auto &bt_name : it.build_targets)
+            {
+                auto bt_it = bg.name_to_id.find(bt_name);
+                if (bt_it == bg.name_to_id.end())
+                {
+                    continue;
+                }
+                const auto &bt = bg.graph.get_vertex(bt_it->second);
+                for (const auto &sg : bt.srcs)
+                {
+                    if (sg.kind == "named_module")
+                    {
+                        for (const auto &src : sg.srcs)
+                        {
+                            auto pcm = build_dir / (src.filename().string() + ".pcm");
+                            auto dst = dst_base / pcm.filename();
+                            file.print("build {}: install_file {}\n\n", dst.string(), pcm.string());
+                            all_installed.push_back(dst.string());
+                        }
+                    }
+                }
+                for (const auto &gg : bt.gen_groups)
+                {
+                    for (const auto &go : gg.outputs)
+                    {
+                        if (go.kind == "named_module")
+                        {
+                            auto pcm = build_dir / (go.path.filename().string() + ".pcm");
+                            auto dst = dst_base / pcm.filename();
+                            file.print("build {}: install_file {}\n\n", dst.string(), pcm.string());
+                            all_installed.push_back(dst.string());
+                        }
+                    }
+                }
+            }
+        }
+        if (!all_installed.empty())
+        {
+            file.print("build install: phony {}\n\n", fmt::join(all_installed, " "));
+        }
+    }
+
+    struct write_ninja_build_options
     {
         public:
             const types::build_graph &graph;
@@ -419,7 +501,7 @@ export namespace cppbuild
             const std::filesystem::path &self_path;
     };
 
-    auto write_ninja_build(const write_ninja_options &opts) -> void
+    auto write_ninja_build(const write_ninja_build_options &opts) -> void
     {
         const auto hu_map = collect_header_unit_info(opts.graph, opts.build_dir);
         auto file = fmt::output_file((opts.build_dir / "build.ninja").string());
@@ -430,5 +512,22 @@ export namespace cppbuild
         precompile_named_module_edges(file, opts.graph, opts.build_dir, hu_map, opts.toolchain);
         codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir, hu_map);
         link_edges(file, opts.graph, opts.toolchain, opts.build_dir);
+    }
+
+    struct write_ninja_install_options
+    {
+        public:
+            const types::build_graph &graph;
+            const std::filesystem::path &build_dir;
+            const std::filesystem::path &prefix;
+    };
+
+    auto write_ninja_install(const write_ninja_install_options &opts) -> void
+    {
+        auto file = fmt::output_file((opts.build_dir / "install.ninja").string());
+        file.print("rule install_file\n");
+        file.print("  command = install -D $in $out\n");
+        file.print("  description = INSTALL $out\n\n");
+        install_edges(file, opts.graph, opts.build_dir, opts.prefix);
     }
 } // namespace cppbuild

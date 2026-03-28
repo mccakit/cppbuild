@@ -98,6 +98,8 @@ export namespace cppbuild::types
             std::string name {};
             std::filesystem::path install_dir {};
             std::vector<std::string> files {};
+            std::vector<std::string> build_targets {};
+            std::vector<std::string> link_targets {};
     };
 
     class toolchain
@@ -254,7 +256,9 @@ export namespace cppbuild::types
                     }
                     install_targets.push_back({.name = std::move(it_raw.name),
                                                .install_dir = std::move(it_raw.install_dir),
-                                               .files = std::move(files)});
+                                               .files = std::move(files),
+                                               .build_targets = std::move(it_raw.build_targets),
+                                               .link_targets = std::move(it_raw.link_targets)});
                 }
             }
             auto order() -> bool

@@ -1,0 +1,10 @@
+{
+  "cxx_compiler": "clang++",
+  "c_compiler": "clang",
+  "archiver": "llvm-ar",
+  "cxx_scanner": "clang-scan-deps",
+  "cxxflags": ["-std=c++26", "-O3", "-Wno-unused-command-line-argument"],
+  "cflags": ["-O3", "-Wno-unused-command-line-argument"],
+  "exe_ldflags": ["-fuse-ld=lld"],
+  "shared_ldflags": ["-shared"]
+}

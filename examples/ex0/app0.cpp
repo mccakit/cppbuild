@@ -1,3 +1,0 @@
-import d;
-
-int main() {}

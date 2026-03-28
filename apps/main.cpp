@@ -18,13 +18,14 @@ auto main(int argc, char **argv) -> int
     configure->add_option("-S,--script-path", script_path_in, "Path to build script");
     configure->add_option("-T,--toolchain-path", toolchain_path_in, "Compiler toolchain to use");
     configure->add_option("-B,--build-dir", build_dir_in, "Build directory");
+    configure->add_option("-I,--install-dir", install_dir_in, "Installation prefix");
+
     // Build Subcommand
     auto build = app.add_subcommand("build", "Execute build targets");
     build->add_option("-B,--build-dir", build_dir_in, "Build directory");
     // Install Subcommand
     auto install = app.add_subcommand("install", "Install build artifacts");
     install->add_option("-B,--build-dir", build_dir_in, "Source build directory");
-    install->add_option("-I,--install-dir", install_dir_in, "Installation prefix");
     // Scan Subcommand
     auto scan_srcs = app.add_subcommand("scan_srcs", "Scan for source changes/dependencies");
     scan_srcs->add_option("-B,--build-dir", build_dir_in, "Build directory");
@@ -45,6 +46,7 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path script_path {std::filesystem::weakly_canonical(script_path_in)};
         std::filesystem::path toolchain_path {std::filesystem::weakly_canonical(toolchain_path_in)};
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        std::filesystem::path install_dir {std::filesystem::weakly_canonical(install_dir_in)};
         std::filesystem::create_directories(build_dir);
         cppbuild::types::toolchain tc {};
         tc.parse(toolchain_path);
@@ -57,6 +59,7 @@ auto main(int argc, char **argv) -> int
                                      .toolchain = tc,
                                      .build_dir = build_dir.string(),
                                      .self_path = std::filesystem::weakly_canonical(argv[0])});
+        cppbuild::write_ninja_install({.graph = graph, .build_dir = build_dir, .prefix = install_dir});
         cppbuild::cache::save(build_dir / "cppbuild.cache", tc, graph);
     }
     else if (build->parsed())

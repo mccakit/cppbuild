@@ -1,0 +1,65 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "target0",
+        srcs: {
+            {kind: "named_module", srcs: {"tgt1_mod.cppm"}},
+            {kind: "translation_unit", srcs: {"tgt1_src.cpp"}},
+            {kind: "header_unit", srcs: {"tgt1_hu.hpp"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {"-I/home/mccakit/desktop/mtest2"}, private: {"-I."}},
+        cflags: {public: {}, private: {}}
+    })
+    cppbuild::add_build_target({
+        name: "target1",
+        srcs: {
+            {kind: "named_module", srcs: {"m4.c++", "m3.cppm", "m2.cc", "m1.cpp", "h1_wrap.cpp"}},
+            {kind: "translation_unit", srcs: {"app0.cpp", "myc.c"}},
+            {kind: "header_unit", srcs: {"h1.hpp"}}
+        },
+        gen_groups: {
+            {
+                command: {
+                    "python3",
+                    "/home/mccakit/desktop/mtest2/codegen.py",
+                    "--inputs",
+                    "/home/mccakit/desktop/mtest2/in0.txt",
+                    "/home/mccakit/desktop/mtest2/in1.txt",
+                    "--outputs",
+                    "/home/mccakit/desktop/mtest2/build/gen0.cpp",
+                    "/home/mccakit/desktop/mtest2/build/gen1.cpp",
+                    "/home/mccakit/desktop/mtest2/build/gen1.hpp"
+                },
+                inputs: {"in0.txt", "in1.txt"},
+                outputs: {
+                    {path: "gen0.cpp", kind: "named_module"},
+                    {path: "gen1.cpp", kind: "translation_unit"}
+                }
+            }
+        },
+        deps: {"target0"},
+        cxxflags: {public: {"-I/home/mccakit/desktop/mtest2"}, private: {"-I/home/mccakit/desktop/mtest2/build"}},
+        cflags: {public: {"-I/home/mccakit/desktop/mtest2"}, private: {"-I/home/mccakit/desktop/mtest2/build"}}
+    })
+    cppbuild::add_link_target({
+        name: "target3",
+        kind: "executable",
+        deps: {"target1"}
+    })
+    cppbuild::add_link_target({
+        name: "target4",
+        kind: "static_library",
+        deps: {"target0"}
+    })
+    cppbuild::add_link_target({
+        name: "target5",
+        kind: "shared_library",
+        deps: {"target0"}
+    })
+    return cppbuild::build_config
+}

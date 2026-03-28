@@ -15,17 +15,3 @@ target_include_directories(
     cppbuild
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-
-add_executable(mytest mytest.cpp)
-target_link_libraries(
-    mytest
-    PRIVATE
-        fmt::fmt
-        cppbuild_lib
-        CLI11::CLI11
-        PkgConfig::GRAAF
-)
-target_include_directories(
-    mytest
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
-)
