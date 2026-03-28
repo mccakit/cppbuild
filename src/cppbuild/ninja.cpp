@@ -63,6 +63,14 @@ export namespace cppbuild
         file.print("rule generate\n");
         file.print("  command = $cmd\n");
         file.print("  description = GEN $out\n\n");
+
+        file.print("rule link\n");
+        file.print("  command = {} $in -o $out $ldflags\n", toolchain.cxx_compiler);
+        file.print("  description = LINK $out\n\n");
+
+        file.print("rule archive\n");
+        file.print("  command = {} rcs $out $in\n", toolchain.archiver);
+        file.print("  description = AR $out\n\n");
     }
 
     auto generate_edges(fmt::ostream &file, const types::build_graph &bg) -> void
@@ -344,6 +352,64 @@ export namespace cppbuild
         file.print("\n");
     }
 
+    auto link_edges(fmt::ostream &file,
+                    const types::build_graph &bg,
+                    const types::toolchain &toolchain,
+                    const std::filesystem::path &build_dir) -> void
+    {
+        for (const auto &lt : bg.link_targets)
+        {
+            std::vector<std::string> objs;
+            for (const auto &dep_name : lt.deps)
+            {
+                auto it = bg.name_to_id.find(dep_name);
+                if (it == bg.name_to_id.end())
+                    continue;
+                for (const auto &dep_target : get_target_with_deps(bg, it->second))
+                {
+                    const auto &dep = dep_target.get();
+                    for (const auto &sg : dep.srcs)
+                    {
+                        if (sg.kind == "translation_unit")
+                            for (const auto &src : sg.srcs)
+                                objs.push_back((build_dir / (src.filename().string() + ".o")).string());
+                        else if (sg.kind == "named_module")
+                            for (const auto &src : sg.srcs)
+                                objs.push_back((build_dir / (src.filename().string() + ".pcm.o")).string());
+                    }
+                    for (const auto &gg : dep.gen_groups)
+                        for (const auto &go : gg.outputs)
+                        {
+                            if (go.kind == "translation_unit")
+                                objs.push_back((build_dir / (go.path.filename().string() + ".o")).string());
+                            else if (go.kind == "named_module")
+                                objs.push_back((build_dir / (go.path.filename().string() + ".pcm.o")).string());
+                        }
+                }
+            }
+            const auto objs_str = fmt::format(" {}", fmt::join(objs, " "));
+            if (lt.kind == "executable")
+            {
+                file.print("build {}: link{}\n", (build_dir / lt.name), objs_str);
+                file.print("  ldflags = {} {}\n", fmt::join(toolchain.exe_ldflags, " "), fmt::join(lt.ldflags, " "));
+                file.print("\n");
+            }
+            else if (lt.kind == "shared_library")
+            {
+                file.print("build {}: link{}\n", (build_dir / ("lib" + lt.name + ".so")).string(), objs_str);
+                file.print("  ldflags = {} {} -shared\n",
+                           fmt::join(toolchain.shared_ldflags, " "),
+                           fmt::join(lt.ldflags, " "));
+                file.print("\n");
+            }
+            else if (lt.kind == "static_library")
+            {
+                file.print("build {}: archive{}\n", (build_dir / ("lib" + lt.name + ".a")).string(), objs_str);
+                file.print("\n");
+            }
+        }
+    }
+
     struct write_ninja_options
     {
         public:
@@ -363,5 +429,6 @@ export namespace cppbuild
         precompile_header_unit_edges(file, opts.graph, opts.build_dir, opts.toolchain);
         precompile_named_module_edges(file, opts.graph, opts.build_dir, hu_map, opts.toolchain);
         codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir, hu_map);
+        link_edges(file, opts.graph, opts.toolchain, opts.build_dir);
     }
 } // namespace cppbuild
