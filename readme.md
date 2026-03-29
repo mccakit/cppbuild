@@ -199,3 +199,12 @@ cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=...
 cmake --build build
 cmake --install build
 ```
+
+## To-do
+
+- import std with toolchain caching,taking a toolchain file as input and precompiling std library to some location to not rebuilt it every build.
+- bundle ninja build binary somehow(any recommendation welcome)
+- Switch dependencies of the project to C++ named modules
+- Introduce 4 quadrant documentation
+- Introduce unit testing
+- Build project itself with release tarball
