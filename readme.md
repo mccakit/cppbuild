@@ -147,7 +147,31 @@ Each function accepts a struct as input. See the full API definition here:
 ```
 ./src/cppbuild/modules/cppbuild/mod.um
 ```
+---
+## Running the Example
 
+Create a container and run this, it extracts llvm, cppbuild and cppbuild example tarballs and runs the example
+```
+mkdir workspace && cd workspace && \
+export DEBIAN_FRONTEND=noninteractive && \
+apt update >/dev/null 2>&1 && \
+apt install -y pixz curl aria2 libstdc++6 libstdc++-12-dev zstd unzip python3 >/dev/null 2>&1 && \
+aria2c -x 16 -s 16 -k 1M -q "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.2/LLVM-22.1.2-Linux-X64.tar.xz" >/dev/null 2>&1 && \
+curl -sSL -o cppbuild.tar.zst "https://codeberg.org/mccakit/cppbuild/releases/download/v0.0/cppbuild.tar.zst" >/dev/null 2>&1 && \
+curl -sSL -o examples.tar.zst "https://codeberg.org/mccakit/cppbuild/releases/download/v0.0/examples.tar.zst" >/dev/null 2>&1 && \
+curl -sSL -o ninja.zip "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip" >/dev/null 2>&1 && \
+mkdir -p llvm examples && \
+tar -I pixz -xf LLVM-22.1.2-Linux-X64.tar.xz -C llvm --strip-components=1 >/dev/null 2>&1 && \
+tar --use-compress-program=unzstd -xf cppbuild.tar.zst >/dev/null 2>&1 && \
+tar --use-compress-program=unzstd -xf examples.tar.zst -C examples --strip-components=1 >/dev/null 2>&1 && \
+unzip -q ninja.zip >/dev/null 2>&1 && \
+./llvm/bin/clang++ --version >/dev/null 2>&1 && \
+./llvm/bin/clang --version >/dev/null 2>&1 && \
+./llvm/bin/clang-scan-deps --version >/dev/null 2>&1 && \
+./cppbuild configure --script-path ./examples/mtest2/build.um --build-dir ./examples/mtest2/build --toolchain-path ./examples/mtest2/tc.json --install-dir ./examples/mtest2/install_prefix && \
+./ninja -C ./examples/mtest2/build && \
+./ninja -f ./examples/mtest2/build/install.ninja
+```
 ---
 
 ## Support
