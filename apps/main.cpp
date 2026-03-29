@@ -51,7 +51,7 @@ auto main(int argc, char **argv) -> int
         cppbuild::types::toolchain tc {};
         tc.parse(toolchain_path);
         cppbuild::script script {script_path};
-        auto result = script.run();
+        auto result = script.run(build_dir, script_path.parent_path());
         cppbuild::types::build_graph graph {};
         graph.parse(result, script_path.string(), build_dir.string());
         graph.order();

@@ -64,3 +64,11 @@ fn add_link_target*(opts: link_target) {
 fn add_install_target*(opts: install_target) {
     build_config.install_targets = append(build_config.install_targets, opts)
 }
+
+var build_dir*: str
+var script_dir*: str
+
+fn set_config*(build: str, script: str) {
+    build_dir = build
+    script_dir = script
+}
