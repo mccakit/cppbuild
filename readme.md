@@ -6,18 +6,7 @@ A minimal C++ build system with an [Umka](https://github.com/vtereshkov/umka-lan
 
 ## Usage
 
-Write an Umka script that returns a `cppbuild::results` value, then invoke the build system with the desired parameters:
-
-```sh
-cppbuild configure \
-    --script-path ./build.um \
-    --build-dir ./build \
-    --toolchain-path ./tc.json \
-    --install-dir ./INSTALL
-
-ninja -C build
-ninja -f build/install.ninja
-```
+Write an Umka script that returns a `cppbuild::results` value, then invoke the build system:
 
 ---
 
@@ -109,6 +98,28 @@ fn configure*(): cppbuild::results {
 
     return cppbuild::build_config
 }
+```
+
+### Building
+
+1. Download both the **examples** and **release** tarballs from the Releases page
+2. Extract them and navigate to:
+
+```
+examples/mtest2
+```
+
+3. Run the build system:
+
+```sh
+{your_install_loc}/cppbuild configure \
+    --script-path ./build.um \
+    --build-dir ./build \
+    --toolchain-path ./tc.json \
+    --install-dir ./INSTALL
+
+{your_install_loc}/ninja -C build
+{your_install_loc}/ninja -f build/install.ninja
 ```
 
 ---
