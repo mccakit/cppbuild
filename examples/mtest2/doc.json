@@ -1,0 +1,125 @@
+{
+  "revision": 0,
+  "rules": [
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/app0.cpp.o",
+      "requires": [
+        {
+          "logical-name": "a",
+          "source-path": "/home/mccakit/desktop/mtest2/m1.cpp"
+        },
+        {
+          "logical-name": "h1",
+          "source-path": "/home/mccakit/desktop/mtest2/h1_wrap.cpp"
+        },
+        {
+          "logical-name": "gen0",
+          "source-path": "/home/mccakit/desktop/mtest2/build/gen0.cpp"
+        },
+        {
+          "logical-name": "tgt1_mod",
+          "source-path": "/home/mccakit/desktop/mtest2/tgt1_mod.cppm"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/gen0.cpp.pcm.o",
+      "provides": [
+        {
+          "is-interface": true,
+          "logical-name": "gen0",
+          "source-path": "/home/mccakit/desktop/mtest2/build/gen0.cpp"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/gen1.cpp.o"
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/h1_wrap.cpp.pcm.o",
+      "provides": [
+        {
+          "is-interface": true,
+          "logical-name": "h1",
+          "source-path": "/home/mccakit/desktop/mtest2/h1_wrap.cpp"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/m1.cpp.pcm.o",
+      "provides": [
+        {
+          "is-interface": true,
+          "logical-name": "a",
+          "source-path": "/home/mccakit/desktop/mtest2/m1.cpp"
+        }
+      ],
+      "requires": [
+        {
+          "logical-name": "b_new",
+          "source-path": "/home/mccakit/desktop/mtest2/m2.cc"
+        },
+        {
+          "logical-name": "c",
+          "source-path": "/home/mccakit/desktop/mtest2/m3.cppm"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/m2.cc.pcm.o",
+      "provides": [
+        {
+          "is-interface": true,
+          "logical-name": "b_new",
+          "source-path": "/home/mccakit/desktop/mtest2/m2.cc"
+        }
+      ],
+      "requires": [
+        {
+          "logical-name": "d",
+          "source-path": "/home/mccakit/desktop/mtest2/m4.c++"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/m3.cppm.pcm.o",
+      "provides": [
+        {
+          "is-interface": true,
+          "logical-name": "c",
+          "source-path": "/home/mccakit/desktop/mtest2/m3.cppm"
+        }
+      ],
+      "requires": [
+        {
+          "logical-name": "d",
+          "source-path": "/home/mccakit/desktop/mtest2/m4.c++"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/m4.c++.pcm.o",
+      "provides": [
+        {
+          "is-interface": true,
+          "logical-name": "d",
+          "source-path": "/home/mccakit/desktop/mtest2/m4.c++"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/tgt1_mod.cppm.pcm.o",
+      "provides": [
+        {
+          "is-interface": true,
+          "logical-name": "tgt1_mod",
+          "source-path": "/home/mccakit/desktop/mtest2/tgt1_mod.cppm"
+        }
+      ]
+    },
+    {
+      "primary-output": "/home/mccakit/desktop/mtest2/build/tgt1_src.cpp.o"
+    }
+  ],
+  "version": 1
+}

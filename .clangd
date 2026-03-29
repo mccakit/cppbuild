@@ -1,0 +1,7 @@
+CompileFlags:
+  CompilationDatabase: build
+
+Diagnostics:
+  Suppress:
+    - module_odr_violation_mismatch_decl_unknown
+    - ovl_ambiguous_member_call

@@ -1,0 +1,8 @@
+build/
+.cxx/
+.gradle
+.zed
+.luarc.json
+/conan/
+/build/
+__cmake*

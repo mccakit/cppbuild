@@ -1,0 +1,6 @@
+[requires]
+fmt/master
+simdjson/master
+neograaf/main
+umkacxx/main
+cli11/main

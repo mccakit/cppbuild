@@ -1,0 +1,74 @@
+type source_files* = struct {
+    kind:      str
+    srcs:      []str
+}
+
+type gen_output* = struct {
+    path:        str
+    kind:        str
+}
+
+type gen_srcs* = struct {
+    command: []str
+    inputs:  []str
+    outputs: []gen_output
+}
+
+type cxx_flags* = struct {
+    public:  []str
+    private: []str
+}
+type c_flags* = struct {
+    public:  []str
+    private: []str
+}
+
+type build_target* = struct {
+    name:     str
+    srcs:     []source_files
+    gen_groups: []gen_srcs
+    deps:     []str
+    cxxflags: cxx_flags
+    cflags:   c_flags
+}
+
+type link_target* = struct {
+    name:    str
+    kind:    str
+    deps:    []str
+    ldflags: []str
+}
+
+type install_target* = struct {
+    name:        str
+    install_dir: str
+    files:         []str
+    build_targets: []str
+    link_targets:  []str
+}
+
+type results* = struct {
+    build_targets:   []build_target
+    link_targets:    []link_target
+    install_targets: []install_target
+}
+
+var build_config*: results
+
+fn add_build_target*(opts: build_target) {
+    build_config.build_targets = append(build_config.build_targets, opts)
+}
+fn add_link_target*(opts: link_target) {
+    build_config.link_targets = append(build_config.link_targets, opts)
+}
+fn add_install_target*(opts: install_target) {
+    build_config.install_targets = append(build_config.install_targets, opts)
+}
+
+var build_dir*: str
+var script_dir*: str
+
+fn set_config*(build: str, script: str) {
+    build_dir = build
+    script_dir = script
+}
