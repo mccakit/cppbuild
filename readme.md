@@ -150,19 +150,13 @@ Release binaries are fully static and built with:
 
 Only this configuration is officially supported for Linux builds.
 
-You *can* build it yourself, but it is not recommended unless you are comfortable packaging dependencies (e.g., with Conan).
+You _can_ build it yourself, but it is not recommended unless you are comfortable packaging dependencies (e.g., with Conan).
 
 ---
 
 ## Notes
 
-- `deps` between build targets are resolved transitively for linking and header unit propagation
-- `gen_groups` run before compilation; outputs declare their kind for proper handling
-- `cxxflags` / `cflags` are split into:
-  - `public` — propagated to dependents
-  - `private` — local to the target
-- Module dependencies are scanned via `clang-scan-deps` (P1689); `dyndep` ensures correct incremental builds
-- `install_dir` is relative to the `--install-dir` prefix
+- Linux distribution toolchains are not supported, you can't use clang-scan-deps from llvm 22 with llvm 23 p1689 databases. Just use the release tarball for llvm like a normal person
 
 ---
 
