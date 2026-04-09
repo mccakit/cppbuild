@@ -1,8 +1,8 @@
-#include <CLI/CLI.hpp>
 import std;
 import umkacxx;
 import cppbuild;
 import fmt;
+import cli11;
 using CLI::App;
 
 auto main(int argc, char **argv) -> int

@@ -1,10 +1,11 @@
 module;
 #include <simdjson.h>
-#include <subprocess.h>
 export module cppbuild:compdb;
 import std;
 import graaf;
 import fmt;
+import subprocess;
+
 import :types;
 
 export namespace cppbuild
@@ -212,25 +213,12 @@ export namespace cppbuild
     auto scan_srcs(const std::filesystem::path &build_dir, const types::toolchain &tc) -> const std::vector<dyndep_entry>
     {
         const auto module_commands = (build_dir / "p1689.json").string();
-        const char *command_line[] = {
-            tc.cxx_scanner.c_str(), "-format=p1689", "-compilation-database", module_commands.c_str(), NULL};
-        struct subprocess_s subprocess;
-        int options =
-            subprocess_option_search_user_path | subprocess_option_inherit_environment | subprocess_option_enable_async;
-        if (subprocess_create(command_line, options, &subprocess) != 0)
-        {
-            return {};
-        }
-        std::string output;
-        char buf[4096];
-        unsigned bytes_read;
-        while ((bytes_read = subprocess_read_stdout(&subprocess, buf, sizeof(buf))) != 0)
-        {
-            output.append(buf, bytes_read);
-        }
-        int process_return;
-        subprocess_join(&subprocess, &process_return);
-        subprocess_destroy(&subprocess);
+
+        auto proc = subprocess::RunBuilder({tc.cxx_scanner, "-format=p1689", "-compilation-database", module_commands})
+            .cout(subprocess::PipeOption::pipe)
+            .run();
+
+        std::string output(proc.cout.begin(), proc.cout.end());
 
         simdjson::dom::parser scan_parser;
         simdjson::dom::parser db_parser;
@@ -251,7 +239,6 @@ export namespace cppbuild
         graaf::directed_graph<cxx_module, int> graph;
         std::unordered_map<std::string, graaf::vertex_id_t> id_map;
 
-        // pass 1: insert vertices
         for (auto rule : scan_doc["rules"])
         {
             cxx_module src {};
@@ -283,7 +270,6 @@ export namespace cppbuild
             id_map[primary_output] = graph.add_vertex(src);
         }
 
-        // pass 2: add edges
         for (auto rule : scan_doc["rules"])
         {
             std::string primary_output = std::string(rule["primary-output"].get_string().value());

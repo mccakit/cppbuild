@@ -1,7 +1,7 @@
 find_package(PkgConfig REQUIRED)
 find_package(fmt REQUIRED)
-find_package(CLI11 CONFIG REQUIRED)
 pkg_check_modules(GRAAF REQUIRED IMPORTED_TARGET graaf)
+pkg_check_modules(CLI11 REQUIRED IMPORTED_TARGET cli11)
 
 add_executable(cppbuild main.cpp)
 target_link_libraries(
@@ -9,7 +9,7 @@ target_link_libraries(
     PRIVATE
         fmt::fmt
         cppbuild_lib
-        CLI11::CLI11
+        PkgConfig::CLI11
 )
 target_include_directories(
     cppbuild

@@ -1,6 +1,5 @@
 module;
 #include <simdjson.h>
-#include <subprocess.h>
 export module cppbuild:types;
 import std;
 import fmt;
