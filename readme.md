@@ -207,8 +207,8 @@ https://github.com/mccakit/conan-recipes
 - neograaf — https://github.com/mccakit/neograaf
 - simdjson — https://github.com/simdjson/simdjson
 - umkacxx — https://github.com/mccakit/umkacxx
-- cli11 — https://github.com/CLIUtils/CLI11
-
+- cli11 — https://github.com/mccakit/cli11
+- subprocess - https://github.com/mccakit/subprocess
 ### Build commands
 
 ```sh
