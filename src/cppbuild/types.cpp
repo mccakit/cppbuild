@@ -1,9 +1,9 @@
 module;
-#include <simdjson.h>
 export module cppbuild:types;
 import std;
 import fmt;
 import graaf;
+import glaze;
 import :modules_cppbuild;
 export namespace cppbuild::types
 {
@@ -112,60 +112,68 @@ export namespace cppbuild::types
             std::vector<std::string> cflags {};
             std::vector<std::string> exe_ldflags {};
             std::vector<std::string> shared_ldflags {};
+
             auto parse(const std::filesystem::path &path) -> void
             {
                 const auto tc_dir = std::filesystem::absolute(path).parent_path();
-
-                auto prefix_if_relative = [&](std::string_view val) -> std::string
-                {
+                auto prefix_if_relative = [&](const std::string &val) -> std::string {
                     const std::filesystem::path p(val);
                     if (p.is_absolute() || p.parent_path().empty())
                     {
-                        return std::string(val);
+                        return val;
                     }
                     return (tc_dir / p).lexically_normal().string();
                 };
 
-                auto parse_flags = [](simdjson::dom::element doc, std::string_view key) -> std::vector<std::string>
+                std::string buffer;
                 {
-                    simdjson::dom::array arr;
-                    std::vector<std::string> out;
-                    if (doc[key].get(arr) == simdjson::SUCCESS)
+                    std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+                    const auto size = ifs.tellg();
+                    ifs.seekg(0);
+                    buffer.resize(static_cast<std::size_t>(size));
+                    ifs.read(buffer.data(), size);
+                }
+
+                glz::generic json {};
+                if (auto ec = glz::read_json(json, buffer); ec)
+                {
+                    throw std::runtime_error(fmt::format("failed to parse toolchain: {}", path.string()));
+                }
+
+                auto &obj = json.get<glz::generic::object_t>();
+
+                auto try_string = [&](const std::string &key, std::string &dest) {
+                    if (auto it = obj.find(key); it != obj.end())
                     {
+                        dest = prefix_if_relative(it->second.get<std::string>());
+                    }
+                };
+
+                auto parse_flags = [&](const std::string &key) -> std::vector<std::string> {
+                    std::vector<std::string> out;
+                    if (auto it = obj.find(key); it != obj.end())
+                    {
+                        auto &arr = it->second.get<glz::generic::array_t>();
                         out.reserve(arr.size());
-                        for (auto f : arr)
+                        for (auto &f : arr)
                         {
-                            out.emplace_back(f.get_string().value());
+                            out.emplace_back(f.get<std::string>());
                         }
                     }
                     return out;
                 };
 
-                simdjson::dom::parser parser;
-                simdjson::dom::element doc = parser.load(path.string());
+                try_string("cxx_compiler", cxx_compiler);
+                try_string("c_compiler", c_compiler);
+                try_string("archiver", archiver);
+                try_string("cxx_scanner", cxx_scanner);
 
-                if (auto val = doc["cxx_compiler"]; val.error() == simdjson::SUCCESS)
-                {
-                    cxx_compiler = prefix_if_relative(val.get_string().value());
-                }
-                if (auto val = doc["c_compiler"]; val.error() == simdjson::SUCCESS)
-                {
-                    c_compiler = prefix_if_relative(val.get_string().value());
-                }
-                if (auto val = doc["archiver"]; val.error() == simdjson::SUCCESS)
-                {
-                    archiver = prefix_if_relative(val.get_string().value());
-                }
-                if (auto val = doc["cxx_scanner"]; val.error() == simdjson::SUCCESS)
-                {
-                    cxx_scanner = prefix_if_relative(val.get_string().value());
-                }
-
-                cxxflags = parse_flags(doc, "cxxflags");
-                cflags = parse_flags(doc, "cflags");
-                exe_ldflags = parse_flags(doc, "exe_ldflags");
-                shared_ldflags = parse_flags(doc, "shared_ldflags");
+                cxxflags = parse_flags("cxxflags");
+                cflags = parse_flags("cflags");
+                exe_ldflags = parse_flags("exe_ldflags");
+                shared_ldflags = parse_flags("shared_ldflags");
             }
+
             auto print() const -> void
             {
                 fmt::println("cxx_compiler:   {}", cxx_compiler);
@@ -278,7 +286,7 @@ export namespace cppbuild::types
                 auto result = graaf::algorithm::dfs_topological_sort(graph);
                 if (!result)
                 {
-                    fmt::print(stderr, "Cycle detected in build graph\n");
+                    fmt::print("Cycle detected in build graph\n");
                     std::terminate();
                 }
                 topo_order = std::move(result.value());

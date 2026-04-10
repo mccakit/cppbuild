@@ -1,11 +1,10 @@
 module;
-#include <simdjson.h>
 export module cppbuild:compdb;
 import std;
 import graaf;
 import fmt;
 import subprocess;
-
+import glaze;
 import :types;
 
 export namespace cppbuild
@@ -21,8 +20,7 @@ export namespace cppbuild
             name_to_target[bt.name] = &bt;
         }
 
-        auto get_hu_flags_for_target = [&](const types::build_target &bt) -> std::string
-        {
+        auto get_hu_flags_for_target = [&](const types::build_target &bt) -> std::string {
             std::string flags;
             for (const auto &sg : bt.srcs)
             {
@@ -30,7 +28,8 @@ export namespace cppbuild
                 {
                     for (const auto &src : sg.srcs)
                     {
-                        flags += fmt::format("-fmodule-file={} ", (build_dir / (src.filename().string() + ".pcm")).string());
+                        flags +=
+                            fmt::format("-fmodule-file={} ", (build_dir / (src.filename().string() + ".pcm")).string());
                     }
                 }
             }
@@ -91,8 +90,7 @@ export namespace cppbuild
         auto add_entry = [&](const std::filesystem::path &src,
                              std::string_view kind,
                              const std::string &flags,
-                             const std::string &extra_flags)
-        {
+                             const std::string &extra_flags) {
             if (kind == "header_unit" || src.extension() == ".c")
             {
                 return;
@@ -114,10 +112,8 @@ export namespace cppbuild
 
         for (const auto &bt : targets)
         {
-            const auto flags = fmt::format("{} {} {} ",
-                                           cxxflags_str,
-                                           fmt::join(bt.cxxflags.public_, " "),
-                                           fmt::join(bt.cxxflags.private_, " "));
+            const auto flags = fmt::format(
+                "{} {} {} ", cxxflags_str, fmt::join(bt.cxxflags.public_, " "), fmt::join(bt.cxxflags.private_, " "));
             const auto &extra_flags = hu_flags.at(bt.name);
             for (const auto &sg : bt.srcs)
             {
@@ -159,7 +155,13 @@ export namespace cppbuild
             const auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
             entries.push_back(fmt::format(
                 "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} -c {} -o {} @{}\",\"output\":\"{}\"}}",
-                dir, src_str, compiler, src_str, obj, rsp, obj));
+                dir,
+                src_str,
+                compiler,
+                src_str,
+                obj,
+                rsp,
+                obj));
         };
 
         for (const auto &bt : targets)
@@ -210,28 +212,44 @@ export namespace cppbuild
             }
     };
 
-    auto scan_srcs(const std::filesystem::path &build_dir, const types::toolchain &tc) -> const std::vector<dyndep_entry>
+    auto scan_srcs(const std::filesystem::path &build_dir, const types::toolchain &tc)
+        -> const std::vector<dyndep_entry>
     {
         const auto module_commands = (build_dir / "p1689.json").string();
 
         auto proc = subprocess::RunBuilder({tc.cxx_scanner, "-format=p1689", "-compilation-database", module_commands})
-            .cout(subprocess::PipeOption::pipe)
-            .run();
+                        .cout(subprocess::PipeOption::pipe)
+                        .run();
 
         std::string output(proc.cout.begin(), proc.cout.end());
 
-        simdjson::dom::parser scan_parser;
-        simdjson::dom::parser db_parser;
-        std::string db_path = build_dir / "p1689.json";
-        auto scan_doc = scan_parser.parse(output);
-        auto compdb = db_parser.load(db_path);
+        std::string db_path = (build_dir / "p1689.json").string();
+        std::string db_buffer;
+        {
+            std::ifstream ifs(db_path, std::ios::binary | std::ios::ate);
+            const auto size = ifs.tellg();
+            ifs.seekg(0);
+            db_buffer.resize(static_cast<std::size_t>(size));
+            ifs.read(db_buffer.data(), size);
+        }
+
+        glz::generic scan_doc {};
+        if (auto ec = glz::read_json(scan_doc, output); ec)
+        {
+        }
+
+        glz::generic compdb {};
+        if (auto ec = glz::read_json(compdb, db_buffer); ec)
+        {
+        }
 
         std::unordered_map<std::string, std::string> output_to_file;
         std::unordered_map<std::string, std::string> file_to_output;
-        for (auto entry : compdb)
+        for (auto &entry : compdb.get<glz::generic::array_t>())
         {
-            std::string file = std::string(entry["file"].get_string().value());
-            std::string out = std::string(entry["output"].get_string().value());
+            auto &obj = entry.get<glz::generic::object_t>();
+            std::string file = obj["file"].get<std::string>();
+            std::string out = obj["output"].get<std::string>();
             output_to_file[out] = file;
             file_to_output[file] = out;
         }
@@ -239,21 +257,21 @@ export namespace cppbuild
         graaf::directed_graph<cxx_module, int> graph;
         std::unordered_map<std::string, graaf::vertex_id_t> id_map;
 
-        for (auto rule : scan_doc["rules"])
+        for (auto &rule : scan_doc["rules"].get<glz::generic::array_t>())
         {
+            auto &rule_obj = rule.get<glz::generic::object_t>();
             cxx_module src {};
-            std::string primary_output = std::string(rule["primary-output"].get_string().value());
+            std::string primary_output = rule_obj["primary-output"].get<std::string>();
 
-            simdjson::dom::array provides_arr;
-            if (!rule["provides"].get(provides_arr))
+            if (auto it = rule_obj.find("provides"); it != rule_obj.end())
             {
-                for (auto provides : provides_arr)
+                for (auto &provides : it->second.get<glz::generic::array_t>())
                 {
-                    src.logical_name = std::string(provides["logical-name"].get_string().value());
-                    std::string_view sp;
-                    if (provides["source-path"].get(sp) == simdjson::SUCCESS)
+                    auto &prov_obj = provides.get<glz::generic::object_t>();
+                    src.logical_name = prov_obj["logical-name"].get<std::string>();
+                    if (auto sp_it = prov_obj.find("source-path"); sp_it != prov_obj.end())
                     {
-                        src.source_path = std::string(sp);
+                        src.source_path = sp_it->second.get<std::string>();
                     }
                 }
             }
@@ -270,15 +288,17 @@ export namespace cppbuild
             id_map[primary_output] = graph.add_vertex(src);
         }
 
-        for (auto rule : scan_doc["rules"])
+        for (auto &rule : scan_doc["rules"].get<glz::generic::array_t>())
         {
-            std::string primary_output = std::string(rule["primary-output"].get_string().value());
-            simdjson::dom::array requires_arr;
-            if (!rule["requires"].get(requires_arr))
+            auto &rule_obj = rule.get<glz::generic::object_t>();
+            std::string primary_output = rule_obj["primary-output"].get<std::string>();
+
+            if (auto it = rule_obj.find("requires"); it != rule_obj.end())
             {
-                for (auto req : requires_arr)
+                for (auto &req : it->second.get<glz::generic::array_t>())
                 {
-                    std::string dep_file = std::string(req["source-path"].get_string().value());
+                    auto &req_obj = req.get<glz::generic::object_t>();
+                    std::string dep_file = req_obj["source-path"].get<std::string>();
                     auto dep_output_it = file_to_output.find(dep_file);
                     if (dep_output_it == file_to_output.end())
                     {

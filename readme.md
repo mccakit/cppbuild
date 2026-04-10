@@ -205,10 +205,10 @@ https://github.com/mccakit/conan-recipes
 
 - libfmt — https://github.com/fmtlib/fmt
 - neograaf — https://github.com/mccakit/neograaf
-- simdjson — https://github.com/simdjson/simdjson
 - umkacxx — https://github.com/mccakit/umkacxx
 - cli11 — https://github.com/mccakit/cli11
 - subprocess - https://github.com/mccakit/subprocess
+- glaze - https://github.com/mccakit/glaze/tree/modules
 ### Build commands
 
 ```sh
