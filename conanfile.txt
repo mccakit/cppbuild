@@ -5,3 +5,4 @@ umkacxx/main
 cli11/main
 subprocess/main
 glaze/modules
+zppbits/main

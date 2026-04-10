@@ -1,8 +1,8 @@
 module;
-#include "zpp_bits.h"
 export module cppbuild:cache;
 import std;
 import fmt;
+import zpp.bits;
 import :types;
 
 export namespace cppbuild::cache
@@ -231,7 +231,7 @@ export namespace cppbuild::cache
         std::ifstream f(cache_path, std::ios::binary);
         if (!f)
         {
-            fmt::print(stderr, "Failed to open cache file: {}\n", cache_path.string());
+            fmt::print("Failed to open cache file: {}\n", cache_path.string());
             std::terminate();
         }
         f.seekg(0, std::ios::end);
@@ -240,7 +240,7 @@ export namespace cppbuild::cache
         std::vector<std::byte> data(size);
         if (!f.read(reinterpret_cast<char *>(data.data()), size))
         {
-            fmt::print(stderr, "Failed to read cache file: {}\n", cache_path.string());
+            fmt::print("Failed to read cache file: {}\n", cache_path.string());
             std::terminate();
         }
 
@@ -251,7 +251,7 @@ export namespace cppbuild::cache
         auto in = zpp::bits::in(data);
         if (zpp::bits::failure(in(tc, cached_builds, cached_links)))
         {
-            fmt::print(stderr, "Failed to deserialize cache: {}\n", cache_path.string());
+            fmt::print("Failed to deserialize cache: {}\n", cache_path.string());
             std::terminate();
         }
 

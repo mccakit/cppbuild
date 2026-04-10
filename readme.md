@@ -209,6 +209,8 @@ https://github.com/mccakit/conan-recipes
 - cli11 — https://github.com/mccakit/cli11
 - subprocess - https://github.com/mccakit/subprocess
 - glaze - https://github.com/mccakit/glaze/tree/modules
+- zppbits - https://github.com/mccakit/zppbits
+
 ### Build commands
 
 ```sh

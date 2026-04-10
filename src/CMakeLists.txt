@@ -4,7 +4,7 @@ pkg_check_modules(GRAAF REQUIRED IMPORTED_TARGET graaf)
 pkg_check_modules(UMKACXX REQUIRED IMPORTED_TARGET umkacxx)
 pkg_check_modules(SUBPROCESS REQUIRED IMPORTED_TARGET subprocess)
 pkg_check_modules(GLAZE REQUIRED IMPORTED_TARGET glaze)
-
+pkg_check_modules(ZPPBITS REQUIRED IMPORTED_TARGET zppbits)
 file(
     GLOB_RECURSE cppbuild_srcs
     CONFIGURE_DEPENDS
@@ -20,5 +20,5 @@ target_link_libraries(
         PkgConfig::UMKACXX
         PkgConfig::SUBPROCESS
         PkgConfig::GLAZE
-        zpp
+        PkgConfig::ZPPBITS
 )
