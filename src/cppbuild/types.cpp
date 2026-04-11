@@ -400,7 +400,13 @@ export namespace cppbuild::types
             {
                 return archive(self.src, self.deps);
             }
-
+            auto save(const std::filesystem::path &path) const -> void
+            {
+                auto [data, out] = zpp::bits::data_out();
+                out(*this).or_throw();
+                std::ofstream f(path, std::ios::binary);
+                f.write(reinterpret_cast<const char *>(data.data()), data.size());
+            }
             auto print() const -> void
             {
                 src.print();

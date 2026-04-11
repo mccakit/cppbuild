@@ -32,6 +32,12 @@ auto main(int argc, char **argv) -> int
     auto gen_p1689 = app.add_subcommand("gen_p1689", "Generate P1689 database");
     gen_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
 
+    auto scan_single = app.add_subcommand("scan_single", "Scan a single source for module dependencies");
+    std::string scanner_in {};
+    std::string db_file_in {};
+    scan_single->add_option("--scanner", scanner_in, "Path to clang-scan-deps")->required();
+    scan_single->add_option("db_file", db_file_in, "P1689 database file")->required();
+
     try
     {
         app.parse(argc, argv);
@@ -67,7 +73,7 @@ auto main(int argc, char **argv) -> int
         {
             build_targets.push_back(bt);
         }
-        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, build_targets, graph.link_targets, {});
+        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, build_targets, graph.link_targets);
     }
     else if (build->parsed())
     {
@@ -89,7 +95,7 @@ auto main(int argc, char **argv) -> int
         auto entries = cppbuild::resolve_transitive_deps(graph);
         cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, entries);
         cppbuild::generate_dyndep(build_dir.string(), entries);
-        cppbuild::cache::save(build_dir / "cppbuild.cache", cache.tc, cache.build_targets, cache.link_targets, entries);
+        cppbuild::cache::save(build_dir / "cppbuild.cache", cache.tc, cache.build_targets, cache.link_targets);
     }
     else if (gen_p1689->parsed())
     {
@@ -97,6 +103,12 @@ auto main(int argc, char **argv) -> int
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
         cppbuild::generate_p1689_per_source(build_dir, cache.tc, cache.build_targets);
         cppbuild::generate_compile_commands(build_dir, cache.tc, cache.build_targets);
+    }
+    else if (scan_single->parsed())
+    {
+        std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
+        std::string scanner {scanner_in};
+        cppbuild::scan_single_source(db_path, scanner);
     }
     return 0;
 }

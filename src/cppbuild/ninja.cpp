@@ -63,6 +63,10 @@ export namespace cppbuild
         file.print("rule archive\n");
         file.print("  command = {} rcs $out @$rsp\n", toolchain.archiver);
         file.print("  description = AR $out\n\n");
+
+        file.print("rule scan_single\n");
+        file.print("  command = {} scan_single --scanner={} $in\n", self_path.string(), toolchain.cxx_scanner);
+        file.print("  description = SCAN $in\n\n");
     }
 
     auto generate_edges(fmt::ostream &file, const types::build_graph &bg) -> void
@@ -84,6 +88,39 @@ export namespace cppbuild
                 }
                 file.print("build {}: generate {}\n", fmt::join(all_outputs, " "), fmt::join(all_inputs, " "));
                 file.print("  cmd = {}\n\n", fmt::join(gg.command, " "));
+            }
+        }
+    }
+
+    auto scan_edges(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg) -> void
+    {
+        for (auto const &[id, bt] : bg.graph.get_vertices())
+        {
+            for (auto const &sg : bt.srcs)
+            {
+                for (auto const &src : sg.srcs)
+                {
+                    if (src.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    const auto db = (build_dir / (src.filename().string() + ".p1689.json")).string();
+                    const auto out = (build_dir / (src.filename().string() + ".dyndep.bin")).string();
+                    file.print("build {}: scan_single {}\n\n", out, db);
+                }
+            }
+            for (auto const &gg : bt.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.path.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    const auto db = (build_dir / (go.path.filename().string() + ".p1689.json")).string();
+                    const auto out = (build_dir / (go.path.filename().string() + ".dyndep.bin")).string();
+                    file.print("build {}: scan_single {}\n\n", out, db);
+                }
             }
         }
     }
@@ -133,9 +170,48 @@ export namespace cppbuild
 
     auto init(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg) -> void
     {
-        file.print("build {}/p1689.json: generate_p1689\n", build_dir.string());
+        // generate per-source p1689 dbs
+        auto p1689_outputs = std::vector<std::string> {};
+        for (auto const &[id, bt] : bg.graph.get_vertices())
+        {
+            for (auto const &sg : bt.srcs)
+            {
+                for (auto const &src : sg.srcs)
+                {
+                    if (src.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    p1689_outputs.push_back((build_dir / (src.filename().string() + ".p1689.json")).string());
+                }
+            }
+            for (auto const &gg : bt.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.path.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    p1689_outputs.push_back((build_dir / (go.path.filename().string() + ".p1689.json")).string());
+                }
+            }
+        }
+
+        file.print("build {}: generate_p1689\n", fmt::join(p1689_outputs, " "));
         file.print("  build_dir = {}\n\n", build_dir.string());
 
+        // scan each source individually
+        auto scan_outputs = std::vector<std::string> {};
+        for (const auto &db : p1689_outputs)
+        {
+            auto db_path = std::filesystem::path {db};
+            const auto out = (db_path.parent_path() / (db_path.stem().stem().string() + ".dyndep.bin")).string();
+            file.print("build {}: scan_single {}\n\n", out, db);
+            scan_outputs.push_back(out);
+        }
+
+        // scan_srcs reads all .dyndep.bin files and produces deps.dd + rsps
         const auto gen_outputs = collect_gen_outputs(bg);
         const auto rsp_outputs = collect_rsp_outputs(bg, build_dir);
 
@@ -145,14 +221,17 @@ export namespace cppbuild
             implicit_outs = fmt::format(" | {}", fmt::join(rsp_outputs, " "));
         }
 
-        std::string implicit_deps;
-        if (!gen_outputs.empty())
-        {
-            implicit_deps = fmt::format(" | {}", fmt::join(gen_outputs, " "));
-        }
-        std::string order_only = fmt::format(" || {}/p1689.json", build_dir.string());
+        auto all_deps = std::vector<std::string> {};
+        all_deps.insert(all_deps.end(), scan_outputs.begin(), scan_outputs.end());
+        all_deps.insert(all_deps.end(), gen_outputs.begin(), gen_outputs.end());
 
-        file.print("build {}/deps.dd{}: scan_srcs{}{}\n", build_dir.string(), implicit_outs, implicit_deps, order_only);
+        std::string implicit_deps;
+        if (!all_deps.empty())
+        {
+            implicit_deps = fmt::format(" | {}", fmt::join(all_deps, " "));
+        }
+
+        file.print("build {}/deps.dd{}: scan_srcs{}\n", build_dir.string(), implicit_outs, implicit_deps);
         file.print("  build_dir = {}\n\n", build_dir.string());
     }
 

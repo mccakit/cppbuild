@@ -113,6 +113,55 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
+    auto scan_single_source(const std::filesystem::path &db_path,
+                            const std::string &scanner) -> void
+    {
+        auto proc = subprocess::RunBuilder({scanner, "--format=p1689", "-compilation-database", db_path.string()})
+                        .cout(subprocess::PipeOption::pipe)
+                        .run();
+        std::string output(proc.cout.begin(), proc.cout.end());
+        glz::generic doc {};
+        if (auto ec = glz::read_json(doc, output); ec)
+        {
+            return;
+        }
+        auto &obj = doc.get<glz::generic::object_t>();
+        auto rules_it = obj.find("rules");
+        if (rules_it == obj.end())
+        {
+            return;
+        }
+        types::dyndep_entry entry {};
+        for (auto &rule : rules_it->second.get<glz::generic::array_t>())
+        {
+            auto &rule_obj = rule.get<glz::generic::object_t>();
+            if (auto it = rule_obj.find("provides"); it != rule_obj.end())
+            {
+                for (auto &provides : it->second.get<glz::generic::array_t>())
+                {
+                    auto &prov_obj = provides.get<glz::generic::object_t>();
+                    entry.src.logical_name = prov_obj["logical-name"].get<std::string>();
+                    if (auto sp_it = prov_obj.find("source-path"); sp_it != prov_obj.end())
+                    {
+                        entry.src.source_path = sp_it->second.get<std::string>();
+                    }
+                }
+            }
+            if (auto it = rule_obj.find("requires"); it != rule_obj.end())
+            {
+                for (auto &req : it->second.get<glz::generic::array_t>())
+                {
+                    auto &req_obj = req.get<glz::generic::object_t>();
+                    types::cxx_module dep {};
+                    dep.logical_name = req_obj["logical-name"].get<std::string>();
+                    entry.deps.push_back(std::move(dep));
+                }
+            }
+        }
+        auto cache_path = db_path.parent_path() / (db_path.stem().stem().string() + ".dyndep.bin");
+        entry.save(cache_path);
+    }
+
     auto run_scanner_per_source(const std::filesystem::path &build_dir,
                                 const types::toolchain &tc,
                                 const std::vector<types::build_target> &targets) -> std::vector<types::dyndep_entry>
