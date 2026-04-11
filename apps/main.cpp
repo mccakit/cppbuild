@@ -68,7 +68,7 @@ auto main(int argc, char **argv) -> int
         {
             build_targets.push_back(bt);
         }
-        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, build_targets, graph.link_targets);
+        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, build_targets, graph.link_targets, {});
     }
     else if (build->parsed())
     {
@@ -90,6 +90,7 @@ auto main(int argc, char **argv) -> int
         auto entries = cppbuild::resolve_transitive_deps(graph);
         cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, entries);
         cppbuild::generate_dyndep(build_dir.string(), entries);
+        cppbuild::cache::save(build_dir / "cppbuild.cache", cache.tc, cache.build_targets, cache.link_targets, entries);
     }
     else if (gen_p1689->parsed())
     {

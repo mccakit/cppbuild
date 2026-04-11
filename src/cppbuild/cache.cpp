@@ -18,10 +18,11 @@ export namespace cppbuild::cache
     auto save(const std::filesystem::path &cache_path,
               const types::toolchain &tc,
               const std::vector<types::build_target> &build_targets,
-              const std::vector<types::link_target> &link_targets) -> void
+              const std::vector<types::link_target> &link_targets,
+              const std::vector<types::dyndep_entry> &dyndep_entries) -> void
     {
         auto [data, out] = zpp::bits::data_out();
-        out(tc, build_targets, link_targets).or_throw();
+        out(tc, build_targets, link_targets, dyndep_entries).or_throw();
         std::ofstream f(cache_path, std::ios::binary);
         f.write(reinterpret_cast<const char *>(data.data()), data.size());
     }
