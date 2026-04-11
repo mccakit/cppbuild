@@ -4,6 +4,7 @@ import std;
 import fmt;
 import graaf;
 import glaze;
+import zpp.bits;
 import :modules_cppbuild;
 export namespace cppbuild::types
 {
@@ -12,6 +13,30 @@ export namespace cppbuild::types
         public:
             std::string kind {};
             std::vector<std::filesystem::path> srcs;
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                std::vector<std::string> srcs_str;
+                if constexpr (archive.kind() == zpp::bits::kind::out)
+                {
+                    srcs_str.reserve(self.srcs.size());
+                    for (const auto &s : self.srcs)
+                    {
+                        srcs_str.push_back(s.string());
+                    }
+                }
+                auto result = archive(self.kind, srcs_str);
+                if constexpr (archive.kind() == zpp::bits::kind::in)
+                {
+                    self.srcs.clear();
+                    self.srcs.reserve(srcs_str.size());
+                    for (const auto &s : srcs_str)
+                    {
+                        self.srcs.emplace_back(s);
+                    }
+                }
+                return result;
+            }
     };
 
     struct gen_output
@@ -19,6 +44,21 @@ export namespace cppbuild::types
         public:
             std::filesystem::path path {};
             std::string kind {};
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                std::string path_str;
+                if constexpr (archive.kind() == zpp::bits::kind::out)
+                {
+                    path_str = self.path.string();
+                }
+                auto result = archive(path_str, self.kind);
+                if constexpr (archive.kind() == zpp::bits::kind::in)
+                {
+                    self.path = path_str;
+                }
+                return result;
+            }
     };
 
     struct gen_group
@@ -27,6 +67,30 @@ export namespace cppbuild::types
             std::vector<std::string> command {};
             std::vector<std::filesystem::path> inputs {};
             std::vector<gen_output> outputs {};
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                std::vector<std::string> inputs_str;
+                if constexpr (archive.kind() == zpp::bits::kind::out)
+                {
+                    inputs_str.reserve(self.inputs.size());
+                    for (const auto &inp : self.inputs)
+                    {
+                        inputs_str.push_back(inp.string());
+                    }
+                }
+                auto result = archive(self.command, inputs_str, self.outputs);
+                if constexpr (archive.kind() == zpp::bits::kind::in)
+                {
+                    self.inputs.clear();
+                    self.inputs.reserve(inputs_str.size());
+                    for (const auto &inp : inputs_str)
+                    {
+                        self.inputs.emplace_back(inp);
+                    }
+                }
+                return result;
+            }
     };
 
     struct cxx_flags
@@ -52,6 +116,11 @@ export namespace cppbuild::types
             std::vector<std::string> deps {};
             cxx_flags cxxflags {};
             c_flags cflags {};
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                return archive(self.name, self.srcs, self.gen_groups, self.deps, self.cxxflags, self.cflags);
+            }
 
             auto print() const -> void
             {
