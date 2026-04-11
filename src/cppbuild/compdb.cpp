@@ -11,57 +11,6 @@ import :types;
 
 export namespace cppbuild
 {
-    auto generate_p1689(const std::filesystem::path &build_dir,
-                        const types::toolchain &tc,
-                        const std::vector<types::build_target> &targets)
-    {
-        auto out = fmt::output_file((build_dir / "p1689.json").string());
-        const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
-        const auto dir = build_dir.string();
-        auto entries = std::vector<std::string> {};
-
-        auto add_entry = [&](const std::filesystem::path &src, std::string_view kind, const std::string &flags) {
-            if (src.extension() == ".c")
-            {
-                return;
-            }
-            const auto ext = kind == "named_module" ? ".pcm.o" : ".o";
-            const auto src_str = src.string();
-            const auto obj = (build_dir / (src.filename().string() + ext)).string();
-            entries.push_back(fmt::format(
-                "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} -c {} -o {}\",\"output\":\"{}\"}}",
-                dir,
-                src_str,
-                tc.cxx_compiler,
-                flags,
-                src_str,
-                obj,
-                obj));
-        };
-
-        for (const auto &bt : targets)
-        {
-            const auto flags = fmt::format(
-                "{} {} {} ", cxxflags_str, fmt::join(bt.cxxflags.public_, " "), fmt::join(bt.cxxflags.private_, " "));
-            for (const auto &sg : bt.srcs)
-            {
-                for (const auto &src : sg.srcs)
-                {
-                    add_entry(src, sg.kind, flags);
-                }
-            }
-            for (const auto &gg : bt.gen_groups)
-            {
-                for (const auto &go : gg.outputs)
-                {
-                    add_entry(go.path, go.kind, flags);
-                }
-            }
-        }
-
-        out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
-    }
-
     auto generate_p1689_per_source(const std::filesystem::path &build_dir,
                                    const types::toolchain &tc,
                                    const std::vector<types::build_target> &targets)
@@ -164,105 +113,156 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
-    auto run_scanner(const std::filesystem::path &build_dir, const types::toolchain &tc) -> std::string
+    auto run_scanner_per_source(const std::filesystem::path &build_dir,
+                                const types::toolchain &tc,
+                                const std::vector<types::build_target> &targets) -> std::vector<types::dyndep_entry>
     {
-        const auto module_commands = (build_dir / "p1689.json").string();
-        auto proc = subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", module_commands})
-                        .cout(subprocess::PipeOption::pipe)
-                        .run();
-        return std::string(proc.cout.begin(), proc.cout.end());
+        std::unordered_map<std::string, types::cxx_module> name_to_module;
+        std::unordered_map<std::string, std::vector<std::string>> file_requires;
+
+        auto scan_one = [&](const std::filesystem::path &src, std::string_view kind) {
+            if (src.extension() == ".c")
+            {
+                return;
+            }
+            const auto db_path = (build_dir / (src.filename().string() + ".p1689.json")).string();
+            auto proc = subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", db_path})
+                            .cout(subprocess::PipeOption::pipe)
+                            .run();
+            std::string output(proc.cout.begin(), proc.cout.end());
+
+            glz::generic doc {};
+            if (auto ec = glz::read_json(doc, output); ec)
+            {
+                return;
+            }
+
+            auto &obj = doc.get<glz::generic::object_t>();
+            auto rules_it = obj.find("rules");
+            if (rules_it == obj.end())
+            {
+                return;
+            }
+
+            for (auto &rule : rules_it->second.get<glz::generic::array_t>())
+            {
+                auto &rule_obj = rule.get<glz::generic::object_t>();
+
+                types::cxx_module mod {};
+                mod.source_path = src;
+
+                if (auto it = rule_obj.find("provides"); it != rule_obj.end())
+                {
+                    for (auto &provides : it->second.get<glz::generic::array_t>())
+                    {
+                        auto &prov_obj = provides.get<glz::generic::object_t>();
+                        mod.logical_name = prov_obj["logical-name"].get<std::string>();
+                        name_to_module[mod.logical_name] = mod;
+                    }
+                }
+
+                if (auto it = rule_obj.find("requires"); it != rule_obj.end())
+                {
+                    for (auto &req : it->second.get<glz::generic::array_t>())
+                    {
+                        auto &req_obj = req.get<glz::generic::object_t>();
+                        file_requires[src.string()].push_back(req_obj["logical-name"].get<std::string>());
+                    }
+                }
+            }
+        };
+
+        for (const auto &bt : targets)
+        {
+            for (const auto &sg : bt.srcs)
+            {
+                for (const auto &src : sg.srcs)
+                {
+                    scan_one(src, sg.kind);
+                }
+            }
+            for (const auto &gg : bt.gen_groups)
+            {
+                for (const auto &go : gg.outputs)
+                {
+                    scan_one(go.path, go.kind);
+                }
+            }
+        }
+
+        std::unordered_map<std::string, types::cxx_module> path_to_module;
+        for (auto &[name, mod] : name_to_module)
+        {
+            path_to_module[mod.source_path.string()] = mod;
+        }
+
+        std::vector<types::dyndep_entry> result;
+        for (auto &[file, req_names] : file_requires)
+        {
+            types::dyndep_entry entry {};
+            if (auto it = path_to_module.find(file); it != path_to_module.end())
+            {
+                entry.src = it->second;
+            }
+            else
+            {
+                entry.src.source_path = file;
+            }
+            for (auto &name : req_names)
+            {
+                if (auto it = name_to_module.find(name); it != name_to_module.end())
+                {
+                    entry.deps.push_back(it->second);
+                }
+            }
+            result.push_back(std::move(entry));
+        }
+
+        for (auto &[name, mod] : name_to_module)
+        {
+            if (file_requires.find(mod.source_path.string()) == file_requires.end())
+            {
+                types::dyndep_entry entry {};
+                entry.src = mod;
+                result.push_back(std::move(entry));
+            }
+        }
+
+        return result;
     }
 
-    auto parse_direct_deps(const std::filesystem::path &build_dir, const std::string &scanner_output)
+    auto parse_direct_deps(const std::vector<types::dyndep_entry> &scanned)
         -> graaf::directed_graph<types::cxx_module, int>
     {
-        std::string db_path = (build_dir / "p1689.json").string();
-        std::string db_buffer;
-        {
-            std::ifstream ifs(db_path, std::ios::binary | std::ios::ate);
-            const auto size = ifs.tellg();
-            ifs.seekg(0);
-            db_buffer.resize(static_cast<std::size_t>(size));
-            ifs.read(db_buffer.data(), size);
-        }
-
-        glz::generic scan_doc {};
-        if (auto ec = glz::read_json(scan_doc, scanner_output); ec)
-        {
-        }
-
-        glz::generic compdb {};
-        if (auto ec = glz::read_json(compdb, db_buffer); ec)
-        {
-        }
-
-        std::unordered_map<std::string, std::string> output_to_file;
-        std::unordered_map<std::string, std::string> file_to_output;
-        for (auto &entry : compdb.get<glz::generic::array_t>())
-        {
-            auto &obj = entry.get<glz::generic::object_t>();
-            std::string file = obj["file"].get<std::string>();
-            std::string out = obj["output"].get<std::string>();
-            output_to_file[out] = file;
-            file_to_output[file] = out;
-        }
-
         graaf::directed_graph<types::cxx_module, int> graph;
-        std::unordered_map<std::string, graaf::vertex_id_t> id_map;
+        std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
+        std::unordered_map<std::string, graaf::vertex_id_t> path_to_id;
 
-        for (auto &rule : scan_doc["rules"].get<glz::generic::array_t>())
+        // add all modules as vertices
+        for (const auto &entry : scanned)
         {
-            auto &rule_obj = rule.get<glz::generic::object_t>();
-            types::cxx_module src {};
-            std::string primary_output = rule_obj["primary-output"].get<std::string>();
-
-            if (auto it = rule_obj.find("provides"); it != rule_obj.end())
+            auto id = graph.add_vertex(entry.src);
+            path_to_id[entry.src.source_path.string()] = id;
+            if (!entry.src.logical_name.empty())
             {
-                for (auto &provides : it->second.get<glz::generic::array_t>())
-                {
-                    auto &prov_obj = provides.get<glz::generic::object_t>();
-                    src.logical_name = prov_obj["logical-name"].get<std::string>();
-                    if (auto sp_it = prov_obj.find("source-path"); sp_it != prov_obj.end())
-                    {
-                        src.source_path = sp_it->second.get<std::string>();
-                    }
-                }
+                name_to_id[entry.src.logical_name] = id;
             }
-
-            if (src.source_path.empty())
-            {
-                auto it = output_to_file.find(primary_output);
-                if (it != output_to_file.end())
-                {
-                    src.source_path = it->second;
-                }
-            }
-
-            id_map[primary_output] = graph.add_vertex(src);
         }
 
-        for (auto &rule : scan_doc["rules"].get<glz::generic::array_t>())
+        // add edges for direct deps
+        for (const auto &entry : scanned)
         {
-            auto &rule_obj = rule.get<glz::generic::object_t>();
-            std::string primary_output = rule_obj["primary-output"].get<std::string>();
-
-            if (auto it = rule_obj.find("requires"); it != rule_obj.end())
+            auto src_it = path_to_id.find(entry.src.source_path.string());
+            if (src_it == path_to_id.end())
             {
-                for (auto &req : it->second.get<glz::generic::array_t>())
+                continue;
+            }
+            for (const auto &dep : entry.deps)
+            {
+                auto dst_it = name_to_id.find(dep.logical_name);
+                if (dst_it != name_to_id.end())
                 {
-                    auto &req_obj = req.get<glz::generic::object_t>();
-                    std::string dep_file = req_obj["source-path"].get<std::string>();
-                    auto dep_output_it = file_to_output.find(dep_file);
-                    if (dep_output_it == file_to_output.end())
-                    {
-                        continue;
-                    }
-                    auto src_it = id_map.find(primary_output);
-                    auto dst_it = id_map.find(dep_output_it->second);
-                    if (src_it != id_map.end() && dst_it != id_map.end())
-                    {
-                        graph.add_edge(src_it->second, dst_it->second, 1);
-                    }
+                    graph.add_edge(src_it->second, dst_it->second, 1);
                 }
             }
         }

@@ -78,8 +78,8 @@ auto main(int argc, char **argv) -> int
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        auto scanner_output = cppbuild::run_scanner(build_dir, cache.tc);
-        auto graph = cppbuild::parse_direct_deps(build_dir, scanner_output);
+        auto scanner_output = cppbuild::run_scanner_per_source(build_dir, cache.tc, cache.build_targets);
+        auto graph = cppbuild::parse_direct_deps(scanner_output);
         auto entries = cppbuild::resolve_transitive_deps(graph);
         cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, entries);
         cppbuild::generate_dyndep(build_dir.string(), entries);
@@ -88,7 +88,6 @@ auto main(int argc, char **argv) -> int
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        cppbuild::generate_p1689(build_dir, cache.tc, cache.build_targets);
         cppbuild::generate_p1689_per_source(build_dir, cache.tc, cache.build_targets);
         cppbuild::generate_compile_commands(build_dir, cache.tc, cache.build_targets);
     }
