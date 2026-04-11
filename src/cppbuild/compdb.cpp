@@ -5,10 +5,39 @@ import graaf;
 import fmt;
 import subprocess;
 import glaze;
+import bs.thread_pool;
+
 import :types;
 
 export namespace cppbuild
 {
+    class cxx_module
+    {
+        public:
+            std::string logical_name {};
+            std::filesystem::path source_path {};
+            auto print() const -> void
+            {
+                fmt::println("{} -> {}", logical_name, source_path.string());
+            }
+    };
+
+    class dyndep_entry
+    {
+        public:
+            cxx_module src;
+            std::vector<cxx_module> deps;
+            auto print() const -> void
+            {
+                src.print();
+                for (auto const &dep : deps)
+                {
+                    fmt::print("  ");
+                    dep.print();
+                }
+            }
+    };
+
     auto generate_p1689(const std::filesystem::path &build_dir,
                         const types::toolchain &tc,
                         const std::vector<types::build_target> &targets)
@@ -18,9 +47,7 @@ export namespace cppbuild
         const auto dir = build_dir.string();
         auto entries = std::vector<std::string> {};
 
-        auto add_entry = [&](const std::filesystem::path &src,
-                             std::string_view kind,
-                             const std::string &flags) {
+        auto add_entry = [&](const std::filesystem::path &src, std::string_view kind, const std::string &flags) {
             if (src.extension() == ".c")
             {
                 return;
@@ -113,43 +140,21 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
-    class cxx_module
-    {
-        public:
-            std::string logical_name {};
-            std::filesystem::path source_path {};
-            auto print() const -> void
-            {
-                fmt::println("{} -> {}", logical_name, source_path.string());
-            }
-    };
-
-    class dyndep_entry
-    {
-        public:
-            cxx_module src;
-            std::vector<cxx_module> deps;
-            auto print() const -> void
-            {
-                src.print();
-                for (auto const &dep : deps)
-                {
-                    fmt::print("  ");
-                    dep.print();
-                }
-            }
-    };
-
-    auto scan_srcs(const std::filesystem::path &build_dir, const types::toolchain &tc)
+    auto scan_srcs(const std::filesystem::path &build_dir, const types::toolchain &tc, BS::thread_pool<> &pool)
         -> const std::vector<dyndep_entry>
     {
+        auto t0 = std::chrono::high_resolution_clock::now();
+
         const auto module_commands = (build_dir / "p1689.json").string();
 
-        auto proc = subprocess::RunBuilder({tc.cxx_scanner, "-format=p1689", "-compilation-database", module_commands})
+        auto proc = subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", module_commands})
                         .cout(subprocess::PipeOption::pipe)
                         .run();
 
         std::string output(proc.cout.begin(), proc.cout.end());
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        fmt::println("  subprocess: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
 
         std::string db_path = (build_dir / "p1689.json").string();
         std::string db_buffer;
@@ -170,6 +175,9 @@ export namespace cppbuild
         if (auto ec = glz::read_json(compdb, db_buffer); ec)
         {
         }
+
+        auto t2 = std::chrono::high_resolution_clock::now();
+        fmt::println("  json parse: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
 
         std::unordered_map<std::string, std::string> output_to_file;
         std::unordered_map<std::string, std::string> file_to_output;
@@ -242,6 +250,9 @@ export namespace cppbuild
             }
         }
 
+        auto t3 = std::chrono::high_resolution_clock::now();
+        fmt::println("  graph build: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count());
+
         std::vector<dyndep_entry> result {};
         for (auto const &[id, value] : graph.get_vertices())
         {
@@ -253,6 +264,9 @@ export namespace cppbuild
             });
             result.push_back(std::move(entry));
         }
+
+        auto t4 = std::chrono::high_resolution_clock::now();
+        fmt::println("  bfs: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count());
 
         return result;
     }

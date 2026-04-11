@@ -53,7 +53,8 @@ export namespace cppbuild
 
         file.print("rule generate\n");
         file.print("  command = $cmd\n");
-        file.print("  description = GEN $out\n\n");
+        file.print("  description = GEN $out\n");
+        file.print("  restat = 1\n\n");
 
         file.print("rule link\n");
         file.print("  command = {} $in -o $out $ldflags\n", toolchain.cxx_compiler);
@@ -103,19 +104,55 @@ export namespace cppbuild
         return outputs;
     }
 
+    auto collect_rsp_outputs(const types::build_graph &bg, const std::filesystem::path &build_dir)
+        -> std::vector<std::string>
+    {
+        std::vector<std::string> rsps;
+        for (auto const &[id, bt] : bg.graph.get_vertices())
+        {
+            for (auto const &sg : bt.srcs)
+            {
+                for (auto const &src : sg.srcs)
+                {
+                    rsps.push_back((build_dir / (src.filename().string() + ".rsp")).string());
+                }
+            }
+            for (auto const &gg : bt.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.kind != "header_unit")
+                    {
+                        rsps.push_back((build_dir / (go.path.filename().string() + ".rsp")).string());
+                    }
+                }
+            }
+        }
+        return rsps;
+    }
+
     auto init(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg) -> void
     {
         file.print("build {}/p1689.json: generate_p1689\n", build_dir.string());
         file.print("  build_dir = {}\n\n", build_dir.string());
 
         const auto gen_outputs = collect_gen_outputs(bg);
-        std::string order_only = fmt::format(" || {}/p1689.json", build_dir.string());
-        if (!gen_outputs.empty())
+        const auto rsp_outputs = collect_rsp_outputs(bg, build_dir);
+
+        std::string implicit_outs;
+        if (!rsp_outputs.empty())
         {
-            order_only += fmt::format(" {}", fmt::join(gen_outputs, " "));
+            implicit_outs = fmt::format(" | {}", fmt::join(rsp_outputs, " "));
         }
 
-        file.print("build {}/deps.dd: scan_srcs{}\n", build_dir.string(), order_only);
+        std::string implicit_deps;
+        if (!gen_outputs.empty())
+        {
+            implicit_deps = fmt::format(" | {}", fmt::join(gen_outputs, " "));
+        }
+        std::string order_only = fmt::format(" || {}/p1689.json", build_dir.string());
+
+        file.print("build {}/deps.dd{}: scan_srcs{}{}\n", build_dir.string(), implicit_outs, implicit_deps, order_only);
         file.print("  build_dir = {}\n\n", build_dir.string());
     }
 

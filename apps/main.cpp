@@ -2,6 +2,7 @@ import std;
 import umkacxx;
 import cppbuild;
 import fmt;
+import bs.thread_pool;
 import cli11;
 using CLI::App;
 
@@ -75,9 +76,13 @@ auto main(int argc, char **argv) -> int
     }
     else if (scan_srcs->parsed())
     {
+        BS::thread_pool<> pool{};
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        auto scanner_output = cppbuild::scan_srcs(build_dir, cache.tc);
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto scanner_output = cppbuild::scan_srcs(build_dir, cache.tc, pool);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        fmt::println("scan_srcs: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
         cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, scanner_output);
         cppbuild::generate_dyndep(build_dir.string(), scanner_output);
     }

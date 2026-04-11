@@ -6,3 +6,4 @@ cli11/main
 subprocess/main
 glaze/modules
 zppbits/main
+thread_pool/main

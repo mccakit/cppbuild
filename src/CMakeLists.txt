@@ -5,6 +5,8 @@ pkg_check_modules(UMKACXX REQUIRED IMPORTED_TARGET umkacxx)
 pkg_check_modules(SUBPROCESS REQUIRED IMPORTED_TARGET subprocess)
 pkg_check_modules(GLAZE REQUIRED IMPORTED_TARGET glaze)
 pkg_check_modules(ZPPBITS REQUIRED IMPORTED_TARGET zppbits)
+pkg_check_modules(THREAD_POOL REQUIRED IMPORTED_TARGET thread_pool)
+
 file(
     GLOB_RECURSE cppbuild_srcs
     CONFIGURE_DEPENDS
@@ -21,4 +23,5 @@ target_link_libraries(
         PkgConfig::SUBPROCESS
         PkgConfig::GLAZE
         PkgConfig::ZPPBITS
+        PkgConfig::THREAD_POOL
 )
