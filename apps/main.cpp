@@ -33,10 +33,9 @@ auto main(int argc, char **argv) -> int
     gen_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
 
     auto scan_single = app.add_subcommand("scan_single", "Scan a single source for module dependencies");
-    std::string scanner_in {};
     std::string db_file_in {};
-    scan_single->add_option("--scanner", scanner_in, "Path to clang-scan-deps")->required();
     scan_single->add_option("db_file", db_file_in, "P1689 database file")->required();
+    scan_single->add_option("-B,--build-dir", build_dir_in, "Build directory");
 
     auto gen_single_p1689 = app.add_subcommand("gen_single_p1689", "Generate P1689 database for a single source");
     gen_single_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
@@ -94,7 +93,7 @@ auto main(int argc, char **argv) -> int
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        auto scanner_output = cppbuild::run_scanner_per_source(build_dir, cache.tc, cache.build_targets);
+        auto scanner_output = cppbuild::load_dyndep_entries(build_dir, cache.build_targets);
         auto graph = cppbuild::parse_direct_deps(scanner_output);
         auto entries = cppbuild::resolve_transitive_deps(graph);
         cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, entries);
@@ -103,9 +102,10 @@ auto main(int argc, char **argv) -> int
     }
     else if (scan_single->parsed())
     {
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
-        std::string scanner {scanner_in};
-        cppbuild::scan_single_source(db_path, scanner);
+        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
+        cppbuild::scan_single_source(db_path, cache.tc);
     }
     else if (gen_single_p1689->parsed())
     {

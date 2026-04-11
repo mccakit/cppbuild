@@ -175,11 +175,12 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
-    auto scan_single_source(const std::filesystem::path &db_path, const std::string &scanner) -> void
+    auto scan_single_source(const std::filesystem::path &db_path, const types::toolchain &tc) -> void
     {
-        auto proc = subprocess::RunBuilder({scanner, "--format=p1689", "-compilation-database", db_path.string()})
-                        .cout(subprocess::PipeOption::pipe)
-                        .run();
+        auto proc =
+            subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", db_path.string()})
+                .cout(subprocess::PipeOption::pipe)
+                .run();
         std::string output(proc.cout.begin(), proc.cout.end());
         glz::generic doc {};
         if (auto ec = glz::read_json(doc, output); ec)
@@ -223,122 +224,38 @@ export namespace cppbuild
         entry.save(cache_path);
     }
 
-    auto run_scanner_per_source(const std::filesystem::path &build_dir,
-                                const types::toolchain &tc,
-                                const std::vector<types::build_target> &targets) -> std::vector<types::dyndep_entry>
+    auto load_dyndep_entries(const std::filesystem::path &build_dir, const std::vector<types::build_target> &targets)
+        -> std::vector<types::dyndep_entry>
     {
-        std::unordered_map<std::string, types::cxx_module> name_to_module;
-        std::unordered_map<std::string, std::vector<std::string>> file_requires;
-
-        auto scan_one = [&](const std::filesystem::path &src, std::string_view kind) {
-            if (src.extension() == ".c")
-            {
-                return;
-            }
-            const auto db_path = (build_dir / (src.filename().string() + ".p1689.json")).string();
-            auto proc = subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", db_path})
-                            .cout(subprocess::PipeOption::pipe)
-                            .run();
-            std::string output(proc.cout.begin(), proc.cout.end());
-
-            glz::generic doc {};
-            if (auto ec = glz::read_json(doc, output); ec)
-            {
-                return;
-            }
-
-            auto &obj = doc.get<glz::generic::object_t>();
-            auto rules_it = obj.find("rules");
-            if (rules_it == obj.end())
-            {
-                return;
-            }
-
-            for (auto &rule : rules_it->second.get<glz::generic::array_t>())
-            {
-                auto &rule_obj = rule.get<glz::generic::object_t>();
-
-                types::cxx_module mod {};
-                mod.source_path = src;
-
-                if (auto it = rule_obj.find("provides"); it != rule_obj.end())
-                {
-                    for (auto &provides : it->second.get<glz::generic::array_t>())
-                    {
-                        auto &prov_obj = provides.get<glz::generic::object_t>();
-                        mod.logical_name = prov_obj["logical-name"].get<std::string>();
-                        name_to_module[mod.logical_name] = mod;
-                    }
-                }
-
-                if (auto it = rule_obj.find("requires"); it != rule_obj.end())
-                {
-                    for (auto &req : it->second.get<glz::generic::array_t>())
-                    {
-                        auto &req_obj = req.get<glz::generic::object_t>();
-                        file_requires[src.string()].push_back(req_obj["logical-name"].get<std::string>());
-                    }
-                }
-            }
-        };
-
+        std::vector<types::dyndep_entry> entries;
         for (const auto &bt : targets)
         {
             for (const auto &sg : bt.srcs)
             {
                 for (const auto &src : sg.srcs)
                 {
-                    scan_one(src, sg.kind);
+                    if (src.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    const auto bin_path = build_dir / (src.filename().string() + ".dyndep.bin");
+                    entries.push_back(types::dyndep_entry::load(bin_path));
                 }
             }
             for (const auto &gg : bt.gen_groups)
             {
                 for (const auto &go : gg.outputs)
                 {
-                    scan_one(go.path, go.kind);
+                    if (go.path.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    const auto bin_path = build_dir / (go.path.filename().string() + ".dyndep.bin");
+                    entries.push_back(types::dyndep_entry::load(bin_path));
                 }
             }
         }
-
-        std::unordered_map<std::string, types::cxx_module> path_to_module;
-        for (auto &[name, mod] : name_to_module)
-        {
-            path_to_module[mod.source_path.string()] = mod;
-        }
-
-        std::vector<types::dyndep_entry> result;
-        for (auto &[file, req_names] : file_requires)
-        {
-            types::dyndep_entry entry {};
-            if (auto it = path_to_module.find(file); it != path_to_module.end())
-            {
-                entry.src = it->second;
-            }
-            else
-            {
-                entry.src.source_path = file;
-            }
-            for (auto &name : req_names)
-            {
-                if (auto it = name_to_module.find(name); it != name_to_module.end())
-                {
-                    entry.deps.push_back(it->second);
-                }
-            }
-            result.push_back(std::move(entry));
-        }
-
-        for (auto &[name, mod] : name_to_module)
-        {
-            if (file_requires.find(mod.source_path.string()) == file_requires.end())
-            {
-                types::dyndep_entry entry {};
-                entry.src = mod;
-                result.push_back(std::move(entry));
-            }
-        }
-
-        return result;
+        return entries;
     }
 
     auto parse_direct_deps(const std::vector<types::dyndep_entry> &scanned)

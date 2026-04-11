@@ -60,7 +60,7 @@ export namespace cppbuild
         file.print("  description = AR $out\n\n");
 
         file.print("rule scan_single\n");
-        file.print("  command = {} scan_single --scanner={} $in\n", self_path.string(), toolchain.cxx_scanner);
+        file.print("  command = {} scan_single --build-dir={} $in\n", self_path.string(), build_dir.string());
         file.print("  description = SCAN $in\n\n");
 
         file.print("rule gen_single_p1689\n");

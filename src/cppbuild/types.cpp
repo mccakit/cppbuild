@@ -407,6 +407,18 @@ export namespace cppbuild::types
                 std::ofstream f(path, std::ios::binary);
                 f.write(reinterpret_cast<const char *>(data.data()), data.size());
             }
+            auto static load(const std::filesystem::path &path) -> dyndep_entry
+            {
+                std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+                const auto size = ifs.tellg();
+                ifs.seekg(0);
+                std::vector<std::byte> data(static_cast<std::size_t>(size));
+                ifs.read(reinterpret_cast<char *>(data.data()), size);
+                dyndep_entry entry {};
+                auto in = zpp::bits::in(data);
+                in(entry).or_throw();
+                return entry;
+            }
             auto print() const -> void
             {
                 src.print();
