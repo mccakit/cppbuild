@@ -57,11 +57,11 @@ export namespace cppbuild
         file.print("  restat = 1\n\n");
 
         file.print("rule link\n");
-        file.print("  command = {} $in -o $out $ldflags\n", toolchain.cxx_compiler);
+        file.print("  command = {} @$rsp -o $out $ldflags\n", toolchain.cxx_compiler);
         file.print("  description = LINK $out\n\n");
 
         file.print("rule archive\n");
-        file.print("  command = {} rcs $out $in\n", toolchain.archiver);
+        file.print("  command = {} rcs $out @$rsp\n", toolchain.archiver);
         file.print("  description = AR $out\n\n");
     }
 
@@ -323,16 +323,34 @@ export namespace cppbuild
                         }
                 }
             }
-            const auto objs_str = fmt::format(" {}", fmt::join(objs, " "));
+
+            auto write_rsp = [&](const std::string &rsp_path) {
+                auto rsp = fmt::output_file(rsp_path);
+                for (const auto &obj : objs)
+                {
+                    rsp.print("{}\n", obj);
+                }
+            };
+
+            auto objs_implicit = fmt::format(" | {}", fmt::join(objs, " "));
+
             if (lt.kind == "executable")
             {
-                file.print("build {}: link{}\n", (build_dir / lt.name), objs_str);
+                auto out_path = (build_dir / lt.name).string();
+                auto rsp_path = (build_dir / (lt.name + ".link.rsp")).string();
+                write_rsp(rsp_path);
+                file.print("build {}: link{}\n", out_path, objs_implicit);
+                file.print("  rsp = {}\n", rsp_path);
                 file.print("  ldflags = {} {}\n", fmt::join(toolchain.exe_ldflags, " "), fmt::join(lt.ldflags, " "));
                 file.print("\n");
             }
             else if (lt.kind == "shared_library")
             {
-                file.print("build {}: link{}\n", (build_dir / ("lib" + lt.name + ".so")).string(), objs_str);
+                auto out_path = (build_dir / ("lib" + lt.name + ".so")).string();
+                auto rsp_path = (build_dir / ("lib" + lt.name + ".so.link.rsp")).string();
+                write_rsp(rsp_path);
+                file.print("build {}: link{}\n", out_path, objs_implicit);
+                file.print("  rsp = {}\n", rsp_path);
                 file.print("  ldflags = {} {} -shared\n",
                            fmt::join(toolchain.shared_ldflags, " "),
                            fmt::join(lt.ldflags, " "));
@@ -340,7 +358,11 @@ export namespace cppbuild
             }
             else if (lt.kind == "static_library")
             {
-                file.print("build {}: archive{}\n", (build_dir / ("lib" + lt.name + ".a")).string(), objs_str);
+                auto out_path = (build_dir / ("lib" + lt.name + ".a")).string();
+                auto rsp_path = (build_dir / ("lib" + lt.name + ".a.link.rsp")).string();
+                write_rsp(rsp_path);
+                file.print("build {}: archive{}\n", out_path, objs_implicit);
+                file.print("  rsp = {}\n", rsp_path);
                 file.print("\n");
             }
         }
