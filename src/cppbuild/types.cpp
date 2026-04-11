@@ -362,4 +362,53 @@ export namespace cppbuild::types
                 return true;
             }
     };
+
+    class cxx_module
+    {
+        public:
+            std::string logical_name {};
+            std::filesystem::path source_path {};
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                std::string sp;
+                if constexpr (archive.kind() == zpp::bits::kind::out)
+                {
+                    sp = self.source_path.string();
+                }
+                auto result = archive(self.logical_name, sp);
+                if constexpr (archive.kind() == zpp::bits::kind::in)
+                {
+                    self.source_path = sp;
+                }
+                return result;
+            }
+
+            auto print() const -> void
+            {
+                fmt::println("{} -> {}", logical_name, source_path.string());
+            }
+    };
+
+    class dyndep_entry
+    {
+        public:
+            cxx_module src;
+            std::vector<cxx_module> deps;
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                return archive(self.src, self.deps);
+            }
+
+            auto print() const -> void
+            {
+                src.print();
+                for (auto const &dep : deps)
+                {
+                    fmt::print("  ");
+                    dep.print();
+                }
+            }
+    };
 } // namespace cppbuild::types

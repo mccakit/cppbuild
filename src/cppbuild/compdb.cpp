@@ -11,33 +11,6 @@ import :types;
 
 export namespace cppbuild
 {
-    class cxx_module
-    {
-        public:
-            std::string logical_name {};
-            std::filesystem::path source_path {};
-            auto print() const -> void
-            {
-                fmt::println("{} -> {}", logical_name, source_path.string());
-            }
-    };
-
-    class dyndep_entry
-    {
-        public:
-            cxx_module src;
-            std::vector<cxx_module> deps;
-            auto print() const -> void
-            {
-                src.print();
-                for (auto const &dep : deps)
-                {
-                    fmt::print("  ");
-                    dep.print();
-                }
-            }
-    };
-
     auto generate_p1689(const std::filesystem::path &build_dir,
                         const types::toolchain &tc,
                         const std::vector<types::build_target> &targets)
@@ -141,7 +114,7 @@ export namespace cppbuild
     }
 
     auto scan_srcs(const std::filesystem::path &build_dir, const types::toolchain &tc, BS::thread_pool<> &pool)
-        -> const std::vector<dyndep_entry>
+        -> const std::vector<types::dyndep_entry>
     {
         auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -190,13 +163,13 @@ export namespace cppbuild
             file_to_output[file] = out;
         }
 
-        graaf::directed_graph<cxx_module, int> graph;
+        graaf::directed_graph<types::cxx_module, int> graph;
         std::unordered_map<std::string, graaf::vertex_id_t> id_map;
 
         for (auto &rule : scan_doc["rules"].get<glz::generic::array_t>())
         {
             auto &rule_obj = rule.get<glz::generic::object_t>();
-            cxx_module src {};
+            types::cxx_module src {};
             std::string primary_output = rule_obj["primary-output"].get<std::string>();
 
             if (auto it = rule_obj.find("provides"); it != rule_obj.end())
@@ -253,10 +226,10 @@ export namespace cppbuild
         auto t3 = std::chrono::high_resolution_clock::now();
         fmt::println("  graph build: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count());
 
-        std::vector<dyndep_entry> result {};
+        std::vector<types::dyndep_entry> result {};
         for (auto const &[id, value] : graph.get_vertices())
         {
-            dyndep_entry entry {};
+            types::dyndep_entry entry {};
             entry.src = value;
             graaf::algorithm::breadth_first_traverse(graph, id, [&](graaf::edge_id_t e) {
                 auto [src, dst] = e;
@@ -271,7 +244,7 @@ export namespace cppbuild
         return result;
     }
 
-    auto generate_dyndep(const std::filesystem::path &build_dir, const std::vector<dyndep_entry> &entries) -> void
+    auto generate_dyndep(const std::filesystem::path &build_dir, const std::vector<types::dyndep_entry> &entries) -> void
     {
         std::ofstream out(build_dir / "deps.dd");
         out << "ninja_dyndep_version = 1\n";
@@ -299,9 +272,9 @@ export namespace cppbuild
     auto generate_rsp(const std::filesystem::path &build_dir,
                       const types::toolchain &tc,
                       const std::vector<types::build_target> &targets,
-                      const std::vector<dyndep_entry> &entries) -> void
+                      const std::vector<types::dyndep_entry> &entries) -> void
     {
-        std::unordered_map<std::string, dyndep_entry const *> src_to_entry;
+        std::unordered_map<std::string, types::dyndep_entry const *> src_to_entry;
         for (auto const &entry : entries)
         {
             src_to_entry[entry.src.source_path.string()] = &entry;
