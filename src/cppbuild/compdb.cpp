@@ -62,6 +62,57 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
+    auto generate_p1689_per_source(const std::filesystem::path &build_dir,
+                                   const types::toolchain &tc,
+                                   const std::vector<types::build_target> &targets)
+    {
+        const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
+        const auto dir = build_dir.string();
+
+        auto write_entry = [&](const std::filesystem::path &src, std::string_view kind, const std::string &flags) {
+            if (src.extension() == ".c")
+            {
+                return;
+            }
+            const auto ext = kind == "named_module" ? ".pcm.o" : ".o";
+            const auto src_str = src.string();
+            const auto obj = (build_dir / (src.filename().string() + ext)).string();
+            const auto db_path = (build_dir / (src.filename().string() + ".p1689.json")).string();
+
+            auto out = fmt::output_file(db_path);
+            out.print("[\n"
+                      "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} -c {} -o {}\",\"output\":\"{}\"}}\n"
+                      "]\n",
+                      dir,
+                      src_str,
+                      tc.cxx_compiler,
+                      flags,
+                      src_str,
+                      obj,
+                      obj);
+        };
+
+        for (const auto &bt : targets)
+        {
+            const auto flags = fmt::format(
+                "{} {} {} ", cxxflags_str, fmt::join(bt.cxxflags.public_, " "), fmt::join(bt.cxxflags.private_, " "));
+            for (const auto &sg : bt.srcs)
+            {
+                for (const auto &src : sg.srcs)
+                {
+                    write_entry(src, sg.kind, flags);
+                }
+            }
+            for (const auto &gg : bt.gen_groups)
+            {
+                for (const auto &go : gg.outputs)
+                {
+                    write_entry(go.path, go.kind, flags);
+                }
+            }
+        }
+    }
+
     auto generate_compile_commands(const std::filesystem::path &build_dir,
                                    const types::toolchain &tc,
                                    const std::vector<types::build_target> &targets)
@@ -113,22 +164,18 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
-    auto scan_srcs(const std::filesystem::path &build_dir, const types::toolchain &tc, BS::thread_pool<> &pool)
-        -> const std::vector<types::dyndep_entry>
+    auto run_scanner(const std::filesystem::path &build_dir, const types::toolchain &tc) -> std::string
     {
-        auto t0 = std::chrono::high_resolution_clock::now();
-
         const auto module_commands = (build_dir / "p1689.json").string();
-
         auto proc = subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", module_commands})
                         .cout(subprocess::PipeOption::pipe)
                         .run();
+        return std::string(proc.cout.begin(), proc.cout.end());
+    }
 
-        std::string output(proc.cout.begin(), proc.cout.end());
-
-        auto t1 = std::chrono::high_resolution_clock::now();
-        fmt::println("  subprocess: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
-
+    auto parse_direct_deps(const std::filesystem::path &build_dir, const std::string &scanner_output)
+        -> graaf::directed_graph<types::cxx_module, int>
+    {
         std::string db_path = (build_dir / "p1689.json").string();
         std::string db_buffer;
         {
@@ -140,7 +187,7 @@ export namespace cppbuild
         }
 
         glz::generic scan_doc {};
-        if (auto ec = glz::read_json(scan_doc, output); ec)
+        if (auto ec = glz::read_json(scan_doc, scanner_output); ec)
         {
         }
 
@@ -148,9 +195,6 @@ export namespace cppbuild
         if (auto ec = glz::read_json(compdb, db_buffer); ec)
         {
         }
-
-        auto t2 = std::chrono::high_resolution_clock::now();
-        fmt::println("  json parse: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
 
         std::unordered_map<std::string, std::string> output_to_file;
         std::unordered_map<std::string, std::string> file_to_output;
@@ -223,9 +267,12 @@ export namespace cppbuild
             }
         }
 
-        auto t3 = std::chrono::high_resolution_clock::now();
-        fmt::println("  graph build: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count());
+        return graph;
+    }
 
+    auto resolve_transitive_deps(const graaf::directed_graph<types::cxx_module, int> &graph)
+        -> std::vector<types::dyndep_entry>
+    {
         std::vector<types::dyndep_entry> result {};
         for (auto const &[id, value] : graph.get_vertices())
         {
@@ -237,14 +284,11 @@ export namespace cppbuild
             });
             result.push_back(std::move(entry));
         }
-
-        auto t4 = std::chrono::high_resolution_clock::now();
-        fmt::println("  bfs: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count());
-
         return result;
     }
 
-    auto generate_dyndep(const std::filesystem::path &build_dir, const std::vector<types::dyndep_entry> &entries) -> void
+    auto generate_dyndep(const std::filesystem::path &build_dir, const std::vector<types::dyndep_entry> &entries)
+        -> void
     {
         std::ofstream out(build_dir / "deps.dd");
         out << "ninja_dyndep_version = 1\n";

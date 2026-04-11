@@ -76,21 +76,20 @@ auto main(int argc, char **argv) -> int
     }
     else if (scan_srcs->parsed())
     {
-        BS::thread_pool<> pool{};
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        auto t0 = std::chrono::high_resolution_clock::now();
-        auto scanner_output = cppbuild::scan_srcs(build_dir, cache.tc, pool);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        fmt::println("scan_srcs: {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
-        cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, scanner_output);
-        cppbuild::generate_dyndep(build_dir.string(), scanner_output);
+        auto scanner_output = cppbuild::run_scanner(build_dir, cache.tc);
+        auto graph = cppbuild::parse_direct_deps(build_dir, scanner_output);
+        auto entries = cppbuild::resolve_transitive_deps(graph);
+        cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, entries);
+        cppbuild::generate_dyndep(build_dir.string(), entries);
     }
     else if (gen_p1689->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
         cppbuild::generate_p1689(build_dir, cache.tc, cache.build_targets);
+        cppbuild::generate_p1689_per_source(build_dir, cache.tc, cache.build_targets);
         cppbuild::generate_compile_commands(build_dir, cache.tc, cache.build_targets);
     }
     return 0;
