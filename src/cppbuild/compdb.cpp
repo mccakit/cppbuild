@@ -13,7 +13,7 @@ export namespace cppbuild
 {
     auto generate_p1689_per_source(const std::filesystem::path &build_dir,
                                    const types::toolchain &tc,
-                                   const std::vector<types::build_target> &targets)
+                                   const std::vector<types::build_target> &targets) -> void
     {
         const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
         const auto dir = build_dir.string();
@@ -64,7 +64,7 @@ export namespace cppbuild
 
     auto generate_compile_commands(const std::filesystem::path &build_dir,
                                    const types::toolchain &tc,
-                                   const std::vector<types::build_target> &targets)
+                                   const std::vector<types::build_target> &targets) -> void
     {
         auto out = fmt::output_file((build_dir / "compile_commands.json").string());
         const auto dir = build_dir.string();
