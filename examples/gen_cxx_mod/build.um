@@ -1,0 +1,37 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "diamond",
+        srcs: {},
+        gen_groups: {
+            {
+                command: {
+                    "python3",
+                    cppbuild::script_dir + "/codegen.py",
+                    "--inputs",
+                    cppbuild::script_dir + "/in0.txt",
+                    cppbuild::script_dir + "/in1.txt",
+                    "--outputs",
+                    cppbuild::build_dir + "/d.cpp",
+                    cppbuild::build_dir + "/c.cpp",
+                    cppbuild::build_dir + "/b.cpp",
+                    cppbuild::build_dir + "/a.cpp"
+                },
+                inputs: {"in0.txt", "in1.txt"},
+                outputs: {
+                    {path: "d.cpp", kind: "named_module"},
+                    {path: "c.cpp", kind: "named_module"},
+                    {path: "b.cpp", kind: "named_module"},
+                    {path: "a.cpp", kind: "named_module"}
+                }
+            }
+        },
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+    return cppbuild::build_config
+}

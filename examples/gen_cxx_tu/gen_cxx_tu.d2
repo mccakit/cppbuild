@@ -1,0 +1,23 @@
+direction: down
+
+in0: in0.txt {style.font-color: "#888"}
+in1: in1.txt {style.font-color: "#888"}
+codegen: codegen.py {style.font-color: "#888"}
+
+in0 -> codegen
+in1 -> codegen
+
+d: d.cpp / d.hpp (generated)
+c: c.cpp / c.hpp (generated)
+b: b.cpp / b.hpp (generated)
+a: a.cpp / a.hpp (generated)
+
+codegen -> d
+codegen -> c
+codegen -> b
+codegen -> a
+
+d -> c
+d -> b
+c -> a
+b -> a

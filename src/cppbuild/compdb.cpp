@@ -9,79 +9,10 @@ import :types;
 
 export namespace cppbuild
 {
-    auto collect_header_unit_flags(const std::vector<types::build_target> &build_targets,
-                                   const std::filesystem::path &build_dir)
-        -> std::unordered_map<std::string, std::string>
-    {
-        std::unordered_map<std::string, const types::build_target *> name_to_target;
-        name_to_target.reserve(build_targets.size());
-        for (const auto &bt : build_targets)
-        {
-            name_to_target[bt.name] = &bt;
-        }
-
-        auto get_hu_flags_for_target = [&](const types::build_target &bt) -> std::string {
-            std::string flags;
-            for (const auto &sg : bt.srcs)
-            {
-                if (sg.kind == "header_unit")
-                {
-                    for (const auto &src : sg.srcs)
-                    {
-                        flags +=
-                            fmt::format("-fmodule-file={} ", (build_dir / (src.filename().string() + ".pcm")).string());
-                    }
-                }
-            }
-            return flags;
-        };
-
-        std::unordered_map<std::string, std::string> result;
-        result.reserve(build_targets.size());
-
-        for (const auto &bt : build_targets)
-        {
-            std::string flags = get_hu_flags_for_target(bt);
-
-            // walk deps transitively via BFS
-            std::unordered_set<std::string> visited;
-            std::queue<std::string> queue;
-            for (const auto &dep : bt.deps)
-            {
-                queue.push(dep);
-            }
-            while (!queue.empty())
-            {
-                auto dep_name = std::move(queue.front());
-                queue.pop();
-                if (!visited.insert(dep_name).second)
-                {
-                    continue;
-                }
-                auto it = name_to_target.find(dep_name);
-                if (it == name_to_target.end())
-                {
-                    continue;
-                }
-                flags += get_hu_flags_for_target(*it->second);
-                for (const auto &transitive_dep : it->second->deps)
-                {
-                    queue.push(transitive_dep);
-                }
-            }
-
-            result[bt.name] = std::move(flags);
-        }
-
-        return result;
-    }
-
     auto generate_p1689(const std::filesystem::path &build_dir,
                         const types::toolchain &tc,
                         const std::vector<types::build_target> &targets)
     {
-        const auto hu_flags = collect_header_unit_flags(targets, build_dir);
-
         auto out = fmt::output_file((build_dir / "p1689.json").string());
         const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
         const auto dir = build_dir.string();
@@ -89,9 +20,8 @@ export namespace cppbuild
 
         auto add_entry = [&](const std::filesystem::path &src,
                              std::string_view kind,
-                             const std::string &flags,
-                             const std::string &extra_flags) {
-            if (kind == "header_unit" || src.extension() == ".c")
+                             const std::string &flags) {
+            if (src.extension() == ".c")
             {
                 return;
             }
@@ -99,12 +29,11 @@ export namespace cppbuild
             const auto src_str = src.string();
             const auto obj = (build_dir / (src.filename().string() + ext)).string();
             entries.push_back(fmt::format(
-                "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} {} -c {} -o {}\",\"output\":\"{}\"}}",
+                "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} -c {} -o {}\",\"output\":\"{}\"}}",
                 dir,
                 src_str,
                 tc.cxx_compiler,
                 flags,
-                extra_flags,
                 src_str,
                 obj,
                 obj));
@@ -114,19 +43,18 @@ export namespace cppbuild
         {
             const auto flags = fmt::format(
                 "{} {} {} ", cxxflags_str, fmt::join(bt.cxxflags.public_, " "), fmt::join(bt.cxxflags.private_, " "));
-            const auto &extra_flags = hu_flags.at(bt.name);
             for (const auto &sg : bt.srcs)
             {
                 for (const auto &src : sg.srcs)
                 {
-                    add_entry(src, sg.kind, flags, extra_flags);
+                    add_entry(src, sg.kind, flags);
                 }
             }
             for (const auto &gg : bt.gen_groups)
             {
                 for (const auto &go : gg.outputs)
                 {
-                    add_entry(go.path, go.kind, flags, extra_flags);
+                    add_entry(go.path, go.kind, flags);
                 }
             }
         }
@@ -407,10 +335,7 @@ export namespace cppbuild
             {
                 for (auto const &go : gg.outputs)
                 {
-                    if (go.kind != "header_unit")
-                    {
-                        write_rsp(go.path);
-                    }
+                    write_rsp(go.path);
                 }
             }
         }

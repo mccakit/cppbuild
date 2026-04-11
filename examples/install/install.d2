@@ -1,0 +1,9 @@
+direction: down
+
+src: mylib.cpp / mylib.hpp
+lib: libmylib.a (static)
+install: install {style.font-color: "#888"}
+
+src -> lib
+lib -> install
+src -> install: mylib.hpp

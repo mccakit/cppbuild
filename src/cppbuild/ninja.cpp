@@ -1,5 +1,4 @@
 module;
-#include <new>
 export module cppbuild:ninja;
 import std;
 import fmt;
@@ -35,15 +34,8 @@ export namespace cppbuild
         file.print("  description = SCAN $out\n");
         file.print("  restat = 1\n\n");
 
-        file.print("rule precompile_header_unit\n");
-        file.print("  command = {} --precompile -fmodule-header=user -xc++-user-header $in -o $out $cxxflags\n",
-                   toolchain.cxx_compiler);
-        file.print("  description = PCM $out\n\n");
-
         file.print("rule precompile_named_module\n");
-        file.print("  command = {} --precompile -x c++-module -Wno-experimental-header-units $in -o $out @$rsp "
-                   "$cxxflags $header_unit_flags\n",
-                   toolchain.cxx_compiler);
+        file.print("  command = {} --precompile -x c++-module $in -o $out @$rsp $cxxflags\n", toolchain.cxx_compiler);
         file.print("  dyndep = $dyndep\n");
         file.print("  description = PCM $out\n\n");
 
@@ -52,8 +44,7 @@ export namespace cppbuild
         file.print("  description = OBJ $out\n\n");
 
         file.print("rule compile_cxx_translation_unit\n");
-        file.print("  command = {} -c $in -o $out -Wno-experimental-header-units @$rsp $cxxflags $header_unit_flags\n",
-                   toolchain.cxx_compiler);
+        file.print("  command = {} -c $in -o $out @$rsp $cxxflags\n", toolchain.cxx_compiler);
         file.print("  description = OBJ $out\n\n");
 
         file.print("rule compile_c_translation_unit\n");
@@ -128,97 +119,16 @@ export namespace cppbuild
         file.print("  build_dir = {}\n\n", build_dir.string());
     }
 
-    auto precompile_header_unit_edges(fmt::ostream &file,
-                                      const types::build_graph &bg,
-                                      const std::filesystem::path &build_dir,
-                                      const types::toolchain &toolchain) -> void
-    {
-        for (auto id : bg.topo_order)
-        {
-            const auto &target = bg.graph.get_vertex(id);
-
-            auto write_edge = [&](const std::filesystem::path &src) {
-                const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
-                file.print("build {}: precompile_header_unit {}\n", pcm, src.string());
-                file.print("  cxxflags = {} {} {}\n",
-                           fmt::join(toolchain.cxxflags, " "),
-                           fmt::join(target.cxxflags.public_, " "),
-                           fmt::join(target.cxxflags.private_, " "));
-                file.print("\n");
-            };
-
-            for (auto const &sg : target.srcs)
-            {
-                if (sg.kind == "header_unit")
-                {
-                    for (auto const &src : sg.srcs)
-                    {
-                        write_edge(src);
-                    }
-                }
-            }
-
-            for (auto const &gg : target.gen_groups)
-            {
-                for (auto const &go : gg.outputs)
-                {
-                    if (go.kind == "header_unit")
-                    {
-                        write_edge(go.path);
-                    }
-                }
-            }
-        }
-    }
-
-    struct header_unit_info
-    {
-            std::string flags {};
-            std::string order_only {};
-    };
-    struct header_unit_info_map
-    {
-            std::unordered_map<graaf::vertex_id_t, header_unit_info> data {};
-    };
-    auto collect_header_unit_info(const types::build_graph &bg, const std::filesystem::path &build_dir)
-        -> header_unit_info_map
-    {
-        header_unit_info_map map {};
-        for (auto id : bg.topo_order)
-        {
-            header_unit_info info {};
-            for (auto const &target : get_target_with_deps(bg, id))
-            {
-                for (auto const &sg : target.get().srcs)
-                {
-                    if (sg.kind == "header_unit")
-                    {
-                        for (auto const &src : sg.srcs)
-                        {
-                            auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
-                            info.flags += fmt::format(" -fmodule-file={}", pcm);
-                            info.order_only += fmt::format(" {}", pcm);
-                        }
-                    }
-                }
-            }
-            map.data[id] = std::move(info);
-        }
-        return map;
-    }
-
     auto precompile_named_module_edges(fmt::ostream &file,
                                        const types::build_graph &bg,
                                        const std::filesystem::path &build_dir,
-                                       const header_unit_info_map &hu_map,
                                        const types::toolchain &toolchain) -> void
     {
         const auto dyndep = (build_dir / "deps.dd").string();
         for (auto id : bg.topo_order)
         {
             const auto &target = bg.graph.get_vertex(id);
-            const auto &info = hu_map.data.at(id);
-            const auto order_only = " || " + dyndep + info.order_only;
+            const auto order_only = " || " + dyndep;
 
             auto write_edge = [&](const std::filesystem::path &src) {
                 const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
@@ -230,10 +140,6 @@ export namespace cppbuild
                            fmt::join(toolchain.cxxflags, " "),
                            fmt::join(target.cxxflags.public_, " "),
                            fmt::join(target.cxxflags.private_, " "));
-                if (!info.flags.empty())
-                {
-                    file.print("  header_unit_flags ={}\n", info.flags);
-                }
                 file.print("\n");
             };
 
@@ -264,15 +170,13 @@ export namespace cppbuild
     auto codegen_edges(fmt::ostream &file,
                        const types::build_graph &bg,
                        const types::toolchain &toolchain,
-                       const std::filesystem::path &build_dir,
-                       const header_unit_info_map &hu_map) -> void
+                       const std::filesystem::path &build_dir) -> void
     {
         const auto dyndep = (build_dir / "deps.dd").string();
         for (auto id : bg.topo_order)
         {
             const auto &target = bg.graph.get_vertex(id);
-            const auto &info = hu_map.data.at(id);
-            const auto order_only = " || " + dyndep + info.order_only;
+            const auto order_only = " || " + dyndep;
 
             auto write_named_module = [&](const std::filesystem::path &src) {
                 auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
@@ -307,10 +211,6 @@ export namespace cppbuild
                                fmt::join(toolchain.cxxflags, " "),
                                fmt::join(target.cxxflags.public_, " "),
                                fmt::join(target.cxxflags.private_, " "));
-                    if (!info.flags.empty())
-                    {
-                        file.print("  header_unit_flags ={}\n", info.flags);
-                    }
                     file.print("\n");
                 }
             };
@@ -502,14 +402,12 @@ export namespace cppbuild
 
     auto write_ninja_build(const write_ninja_build_options &opts) -> void
     {
-        const auto hu_map = collect_header_unit_info(opts.graph, opts.build_dir);
         auto file = fmt::output_file((opts.build_dir / "build.ninja").string());
         rules(file, opts.toolchain, opts.self_path, opts.build_dir, opts.graph);
         generate_edges(file, opts.graph);
         init(file, opts.build_dir, opts.graph);
-        precompile_header_unit_edges(file, opts.graph, opts.build_dir, opts.toolchain);
-        precompile_named_module_edges(file, opts.graph, opts.build_dir, hu_map, opts.toolchain);
-        codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir, hu_map);
+        precompile_named_module_edges(file, opts.graph, opts.build_dir, opts.toolchain);
+        codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir);
         link_edges(file, opts.graph, opts.toolchain, opts.build_dir);
     }
 

@@ -1,0 +1,83 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "mathlib",
+        srcs: {
+            {kind: "translation_unit", srcs: {"mathlib.c"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {"-I" + cppbuild::script_dir}, private: {}}
+    })
+    cppbuild::add_build_target({
+        name: "strlib",
+        srcs: {
+            {kind: "named_module", srcs: {"strlib.cppm"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+    cppbuild::add_build_target({
+        name: "config",
+        srcs: {},
+        gen_groups: {
+            {
+                command: {
+                    "python3",
+                    cppbuild::script_dir + "/codegen.py",
+                    "--inputs",
+                    cppbuild::script_dir + "/in0.txt",
+                    cppbuild::script_dir + "/in1.txt",
+                    "--outputs",
+                    cppbuild::build_dir + "/config.cppm"
+                },
+                inputs: {"in0.txt", "in1.txt"},
+                outputs: {
+                    {path: "config.cppm", kind: "named_module"}
+                }
+            }
+        },
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+    cppbuild::add_build_target({
+        name: "app",
+        srcs: {
+            {kind: "translation_unit", srcs: {"main.cpp"}}
+        },
+        gen_groups: {},
+        deps: {"mathlib", "strlib", "config"},
+        cxxflags: {public: {"-I" + cppbuild::script_dir}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+    cppbuild::add_link_target({
+        name: "app",
+        kind: "executable",
+        deps: {"app"}
+    })
+    cppbuild::add_link_target({
+        name: "mathlib",
+        kind: "static_library",
+        deps: {"mathlib"}
+    })
+    cppbuild::add_link_target({
+        name: "strlib",
+        kind: "shared_library",
+        deps: {"strlib"}
+    })
+    cppbuild::add_install_target({
+        name: "default",
+        install_dir: "./install",
+        build_targets: {"strlib", "config"},
+        link_targets: {"app", "mathlib", "strlib"},
+        files: {"mathlib.h"},
+    })
+    return cppbuild::build_config
+}

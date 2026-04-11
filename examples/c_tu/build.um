@@ -1,0 +1,17 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "diamond",
+        srcs: {
+            {kind: "translation_unit", srcs: {"d.c", "c.c", "b.c", "a.c"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {"-I" + cppbuild::script_dir}, private: {}}
+    })
+    return cppbuild::build_config
+}

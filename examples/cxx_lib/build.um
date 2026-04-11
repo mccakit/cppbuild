@@ -1,0 +1,27 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "mylib",
+        srcs: {
+            {kind: "named_module", srcs: {"mylib.cppm"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+    cppbuild::add_link_target({
+        name: "mylib_static",
+        kind: "static_library",
+        deps: {"mylib"}
+    })
+    cppbuild::add_link_target({
+        name: "mylib_shared",
+        kind: "shared_library",
+        deps: {"mylib"}
+    })
+    return cppbuild::build_config
+}

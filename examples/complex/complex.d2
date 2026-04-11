@@ -1,0 +1,32 @@
+direction: down
+
+in0: in0.txt {style.font-color: "#888"}
+in1: in1.txt {style.font-color: "#888"}
+codegen: codegen.py {style.font-color: "#888"}
+
+in0 -> codegen
+in1 -> codegen
+
+mathlib: mathlib.c / mathlib.h (C)
+strlib: strlib.cppm | strlib (module)
+config: config.cppm | config (generated module)
+main: main.cpp
+
+codegen -> config
+
+mathlib -> main
+strlib -> main
+config -> main
+
+app_exe: app (executable)
+mathlib_a: libmathlib.a (static)
+strlib_so: libstrlib.so (shared)
+
+main -> app_exe
+mathlib -> mathlib_a
+strlib -> strlib_so
+
+install: install {style.font-color: "#888"}
+app_exe -> install
+mathlib_a -> install
+strlib_so -> install

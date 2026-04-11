@@ -1,0 +1,10 @@
+{
+  "cxx_compiler": "/home/mccakit/dev/llvm/bin/clang++",
+  "c_compiler": "/home/mccakit/dev/llvm/bin/clang",
+  "archiver": "/home/mccakit/dev/llvm/bin/llvm-ar",
+  "cxx_scanner": "/home/mccakit/dev/llvm/bin/clang-scan-deps",
+  "cxxflags": ["-std=c++26", "-O3", "-Wno-unused-command-line-argument"],
+  "cflags": ["-O3", "-Wno-unused-command-line-argument"],
+  "exe_ldflags": ["-fuse-ld=lld"],
+  "shared_ldflags": ["-fuse-ld=lld"]
+}

@@ -1,0 +1,29 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "mylib",
+        srcs: {
+            {kind: "translation_unit", srcs: {"mylib.cpp"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {"-I" + cppbuild::script_dir}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+    cppbuild::add_link_target({
+        name: "mylib",
+        kind: "static_library",
+        deps: {"mylib"}
+    })
+    cppbuild::add_install_target({
+        name: "default",
+        install_dir: "./install",
+        build_targets: {},
+        link_targets: {"mylib"},
+        files: {"mylib.hpp"},
+    })
+    return cppbuild::build_config
+}

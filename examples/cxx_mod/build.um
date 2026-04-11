@@ -1,0 +1,17 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "target",
+        srcs: {
+            {kind: "named_module", srcs: {"m4.c++", "m3.cppm", "m2.cc", "m1.cpp"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+    return cppbuild::build_config
+}
