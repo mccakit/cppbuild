@@ -61,7 +61,14 @@ auto main(int argc, char **argv) -> int
                                      .build_dir = build_dir.string(),
                                      .self_path = std::filesystem::weakly_canonical(argv[0])});
         cppbuild::write_ninja_install({.graph = graph, .build_dir = build_dir, .prefix = install_dir});
-        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, graph);
+
+        std::vector<cppbuild::types::build_target> build_targets;
+        build_targets.reserve(graph.graph.vertex_count());
+        for (const auto &[id, bt] : graph.graph.get_vertices())
+        {
+            build_targets.push_back(bt);
+        }
+        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, build_targets, graph.link_targets);
     }
     else if (build->parsed())
     {

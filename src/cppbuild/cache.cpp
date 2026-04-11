@@ -15,20 +15,13 @@ export namespace cppbuild::cache
             std::vector<types::link_target> link_targets {};
     };
 
-    auto save(const std::filesystem::path &cache_path, const types::toolchain &tc, const types::build_graph &bg) -> void
+    auto save(const std::filesystem::path &cache_path,
+              const types::toolchain &tc,
+              const std::vector<types::build_target> &build_targets,
+              const std::vector<types::link_target> &link_targets) -> void
     {
-        std::vector<types::build_target> build_targets;
-        build_targets.reserve(bg.graph.vertex_count());
-        for (const auto &[id, bt] : bg.graph.get_vertices())
-        {
-            build_targets.push_back(bt);
-        }
-
-        std::vector<types::link_target> link_targets = bg.link_targets;
-
         auto [data, out] = zpp::bits::data_out();
         out(tc, build_targets, link_targets).or_throw();
-
         std::ofstream f(cache_path, std::ios::binary);
         f.write(reinterpret_cast<const char *>(data.data()), data.size());
     }
