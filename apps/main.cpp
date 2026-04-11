@@ -14,25 +14,24 @@ auto main(int argc, char **argv) -> int
     std::string build_dir_in {};
     std::string install_dir_in {};
 
-    // Configure Subcommand
     auto configure = app.add_subcommand("configure", "Configure the project");
     configure->add_option("-S,--script-path", script_path_in, "Path to build script");
     configure->add_option("-T,--toolchain-path", toolchain_path_in, "Compiler toolchain to use");
     configure->add_option("-B,--build-dir", build_dir_in, "Build directory");
     configure->add_option("-I,--install-dir", install_dir_in, "Installation prefix");
 
-    // Build Subcommand
     auto build = app.add_subcommand("build", "Execute build targets");
     build->add_option("-B,--build-dir", build_dir_in, "Build directory");
-    // Install Subcommand
+
     auto install = app.add_subcommand("install", "Install build artifacts");
     install->add_option("-B,--build-dir", build_dir_in, "Source build directory");
-    // Scan Subcommand
+
     auto scan_srcs = app.add_subcommand("scan_srcs", "Scan for source changes/dependencies");
     scan_srcs->add_option("-B,--build-dir", build_dir_in, "Build directory");
-    // Generate P1689 Subcommand
+
     auto gen_p1689 = app.add_subcommand("gen_p1689", "Generate P1689 database");
     gen_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
+
     try
     {
         app.parse(argc, argv);
