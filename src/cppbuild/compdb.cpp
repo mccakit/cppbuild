@@ -11,6 +11,68 @@ import :types;
 
 export namespace cppbuild
 {
+    auto generate_single_p1689(const std::filesystem::path &source,
+                               const std::filesystem::path &build_dir,
+                               const types::toolchain &tc,
+                               const std::vector<types::build_target> &targets) -> void
+    {
+        const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
+        const auto dir = build_dir.string();
+
+        std::string kind;
+        std::string flags;
+
+        for (const auto &bt : targets)
+        {
+            const auto bt_flags = fmt::format(
+                "{} {} {} ", cxxflags_str, fmt::join(bt.cxxflags.public_, " "), fmt::join(bt.cxxflags.private_, " "));
+            for (const auto &sg : bt.srcs)
+            {
+                for (const auto &src : sg.srcs)
+                {
+                    if (src == source)
+                    {
+                        kind = sg.kind;
+                        flags = bt_flags;
+                    }
+                }
+            }
+            for (const auto &gg : bt.gen_groups)
+            {
+                for (const auto &go : gg.outputs)
+                {
+                    if (go.path == source)
+                    {
+                        kind = go.kind;
+                        flags = bt_flags;
+                    }
+                }
+            }
+        }
+
+        if (kind.empty())
+        {
+            return;
+        }
+
+        const auto ext = kind == "named_module" ? ".pcm.o" : ".o";
+        const auto src_str = source.string();
+        const auto obj = (build_dir / (source.filename().string() + ext)).string();
+        const auto db_path = (build_dir / (source.filename().string() + ".p1689.json")).string();
+
+        auto out = fmt::output_file(db_path);
+        out.print("[\n"
+                  "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} -c {} -o {}\",\"output\":\"{}\"}}\n"
+                  "]\n",
+                  dir,
+                  src_str,
+                  tc.cxx_compiler,
+                  flags,
+                  src_str,
+                  obj,
+                  obj);
+    }
+
     auto generate_p1689_per_source(const std::filesystem::path &build_dir,
                                    const types::toolchain &tc,
                                    const std::vector<types::build_target> &targets) -> void
@@ -113,8 +175,7 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
-    auto scan_single_source(const std::filesystem::path &db_path,
-                            const std::string &scanner) -> void
+    auto scan_single_source(const std::filesystem::path &db_path, const std::string &scanner) -> void
     {
         auto proc = subprocess::RunBuilder({scanner, "--format=p1689", "-compilation-database", db_path.string()})
                         .cout(subprocess::PipeOption::pipe)

@@ -38,6 +38,10 @@ auto main(int argc, char **argv) -> int
     scan_single->add_option("--scanner", scanner_in, "Path to clang-scan-deps")->required();
     scan_single->add_option("db_file", db_file_in, "P1689 database file")->required();
 
+    auto gen_single_p1689 = app.add_subcommand("gen_single_p1689", "Generate P1689 database for a single source");
+    gen_single_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
+    std::string source_in {};
+    gen_single_p1689->add_option("source", source_in, "Source file")->required();
     try
     {
         app.parse(argc, argv);
@@ -97,18 +101,18 @@ auto main(int argc, char **argv) -> int
         cppbuild::generate_dyndep(build_dir.string(), entries);
         cppbuild::cache::save(build_dir / "cppbuild.cache", cache.tc, cache.build_targets, cache.link_targets);
     }
-    else if (gen_p1689->parsed())
-    {
-        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        cppbuild::generate_p1689_per_source(build_dir, cache.tc, cache.build_targets);
-        cppbuild::generate_compile_commands(build_dir, cache.tc, cache.build_targets);
-    }
     else if (scan_single->parsed())
     {
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
         std::string scanner {scanner_in};
         cppbuild::scan_single_source(db_path, scanner);
+    }
+    else if (gen_single_p1689->parsed())
+    {
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        std::filesystem::path source {std::filesystem::weakly_canonical(source_in)};
+        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
+        cppbuild::generate_single_p1689(source, build_dir, cache.tc, cache.build_targets);
     }
     return 0;
 }

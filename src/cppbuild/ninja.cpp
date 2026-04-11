@@ -24,11 +24,6 @@ export namespace cppbuild
                const std::filesystem::path &build_dir,
                const types::build_graph &bg) -> void
     {
-        file.print("rule generate_p1689\n");
-        file.print("  command = {} gen_p1689 --build-dir=$build_dir\n", self_path.string());
-        file.print("  description = GEN P1689 DB $out\n");
-        file.print("  restat = 1\n\n");
-
         file.print("rule scan_srcs\n");
         file.print("  command = {} scan_srcs --build-dir=$build_dir\n", self_path.string());
         file.print("  description = SCAN $out\n");
@@ -67,6 +62,11 @@ export namespace cppbuild
         file.print("rule scan_single\n");
         file.print("  command = {} scan_single --scanner={} $in\n", self_path.string(), toolchain.cxx_scanner);
         file.print("  description = SCAN $in\n\n");
+
+        file.print("rule gen_single_p1689\n");
+        file.print("  command = {} gen_single_p1689 --build-dir={} $in\n", self_path.string(), build_dir.string());
+        file.print("  description = GEN P1689 $in\n");
+        file.print("  restat = 1\n\n");
     }
 
     auto generate_edges(fmt::ostream &file, const types::build_graph &bg) -> void
@@ -92,8 +92,10 @@ export namespace cppbuild
         }
     }
 
-    auto scan_edges(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg) -> void
+    auto p1689_edges(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg)
+        -> std::vector<std::string>
     {
+        auto outputs = std::vector<std::string> {};
         for (auto const &[id, bt] : bg.graph.get_vertices())
         {
             for (auto const &sg : bt.srcs)
@@ -105,8 +107,8 @@ export namespace cppbuild
                         continue;
                     }
                     const auto db = (build_dir / (src.filename().string() + ".p1689.json")).string();
-                    const auto out = (build_dir / (src.filename().string() + ".dyndep.bin")).string();
-                    file.print("build {}: scan_single {}\n\n", out, db);
+                    file.print("build {}: gen_single_p1689 {}\n\n", db, src.string());
+                    outputs.push_back(db);
                 }
             }
             for (auto const &gg : bt.gen_groups)
@@ -118,102 +120,74 @@ export namespace cppbuild
                         continue;
                     }
                     const auto db = (build_dir / (go.path.filename().string() + ".p1689.json")).string();
-                    const auto out = (build_dir / (go.path.filename().string() + ".dyndep.bin")).string();
-                    file.print("build {}: scan_single {}\n\n", out, db);
-                }
-            }
-        }
-    }
-
-    auto collect_gen_outputs(const types::build_graph &bg) -> std::vector<std::string>
-    {
-        std::vector<std::string> outputs;
-        for (auto const &[id, bt] : bg.graph.get_vertices())
-        {
-            for (auto const &gg : bt.gen_groups)
-            {
-                for (auto const &out : gg.outputs)
-                {
-                    outputs.push_back(out.path.string());
+                    file.print("build {}: gen_single_p1689 {}\n\n", db, go.path.string());
+                    outputs.push_back(db);
                 }
             }
         }
         return outputs;
     }
 
-    auto collect_rsp_outputs(const types::build_graph &bg, const std::filesystem::path &build_dir)
-        -> std::vector<std::string>
+    auto scan_edges(fmt::ostream &file, const std::vector<std::string> &p1689_outputs) -> std::vector<std::string>
     {
-        std::vector<std::string> rsps;
-        for (auto const &[id, bt] : bg.graph.get_vertices())
-        {
-            for (auto const &sg : bt.srcs)
-            {
-                for (auto const &src : sg.srcs)
-                {
-                    rsps.push_back((build_dir / (src.filename().string() + ".rsp")).string());
-                }
-            }
-            for (auto const &gg : bt.gen_groups)
-            {
-                for (auto const &go : gg.outputs)
-                {
-                    if (go.kind != "header_unit")
-                    {
-                        rsps.push_back((build_dir / (go.path.filename().string() + ".rsp")).string());
-                    }
-                }
-            }
-        }
-        return rsps;
-    }
-
-    auto init(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg) -> void
-    {
-        // generate per-source p1689 dbs
-        auto p1689_outputs = std::vector<std::string> {};
-        for (auto const &[id, bt] : bg.graph.get_vertices())
-        {
-            for (auto const &sg : bt.srcs)
-            {
-                for (auto const &src : sg.srcs)
-                {
-                    if (src.extension() == ".c")
-                    {
-                        continue;
-                    }
-                    p1689_outputs.push_back((build_dir / (src.filename().string() + ".p1689.json")).string());
-                }
-            }
-            for (auto const &gg : bt.gen_groups)
-            {
-                for (auto const &go : gg.outputs)
-                {
-                    if (go.path.extension() == ".c")
-                    {
-                        continue;
-                    }
-                    p1689_outputs.push_back((build_dir / (go.path.filename().string() + ".p1689.json")).string());
-                }
-            }
-        }
-
-        file.print("build {}: generate_p1689\n", fmt::join(p1689_outputs, " "));
-        file.print("  build_dir = {}\n\n", build_dir.string());
-
-        // scan each source individually
-        auto scan_outputs = std::vector<std::string> {};
+        auto outputs = std::vector<std::string> {};
         for (const auto &db : p1689_outputs)
         {
             auto db_path = std::filesystem::path {db};
             const auto out = (db_path.parent_path() / (db_path.stem().stem().string() + ".dyndep.bin")).string();
             file.print("build {}: scan_single {}\n\n", out, db);
-            scan_outputs.push_back(out);
+            outputs.push_back(out);
         }
+        return outputs;
+    }
 
-        // scan_srcs reads all .dyndep.bin files and produces deps.dd + rsps
-        const auto gen_outputs = collect_gen_outputs(bg);
-        const auto rsp_outputs = collect_rsp_outputs(bg, build_dir);
+    auto dyndep_edge(fmt::ostream &file,
+                     const std::filesystem::path &build_dir,
+                     const types::build_graph &bg,
+                     const std::vector<std::string> &scan_outputs) -> void
+    {
+        auto collect_gen_outputs = [&]() {
+            std::vector<std::string> outputs;
+            for (auto const &[id, bt] : bg.graph.get_vertices())
+            {
+                for (auto const &gg : bt.gen_groups)
+                {
+                    for (auto const &out : gg.outputs)
+                    {
+                        outputs.push_back(out.path.string());
+                    }
+                }
+            }
+            return outputs;
+        };
+
+        auto collect_rsp_outputs = [&]() {
+            std::vector<std::string> rsps;
+            for (auto const &[id, bt] : bg.graph.get_vertices())
+            {
+                for (auto const &sg : bt.srcs)
+                {
+                    for (auto const &src : sg.srcs)
+                    {
+                        rsps.push_back((build_dir / (src.filename().string() + ".rsp")).string());
+                    }
+                }
+                for (auto const &gg : bt.gen_groups)
+                {
+                    for (auto const &go : gg.outputs)
+                    {
+                        if (go.kind != "header_unit")
+                        {
+                            rsps.push_back((build_dir / (go.path.filename().string() + ".rsp")).string());
+                        }
+                    }
+                }
+            }
+            return rsps;
+        };
+
+        const auto gen_outputs = collect_gen_outputs();
+        const auto rsp_outputs = collect_rsp_outputs();
 
         std::string implicit_outs;
         if (!rsp_outputs.empty())
@@ -543,7 +517,9 @@ export namespace cppbuild
         auto file = fmt::output_file((opts.build_dir / "build.ninja").string());
         rules(file, opts.toolchain, opts.self_path, opts.build_dir, opts.graph);
         generate_edges(file, opts.graph);
-        init(file, opts.build_dir, opts.graph);
+        auto p1689s = p1689_edges(file, opts.build_dir, opts.graph);
+        auto scans = scan_edges(file, p1689s);
+        dyndep_edge(file, opts.build_dir, opts.graph, scans);
         precompile_named_module_edges(file, opts.graph, opts.build_dir, opts.toolchain);
         codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir);
         link_edges(file, opts.graph, opts.toolchain, opts.build_dir);
