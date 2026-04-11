@@ -277,7 +277,6 @@ export namespace cppbuild
         out << "ninja_dyndep_version = 1\n";
         for (auto const &entry : entries)
         {
-            auto obj = build_dir / (entry.src.source_path.filename().string() + ".o");
             std::string dep_pcms;
             for (auto const &dep : entry.deps)
             {
@@ -287,11 +286,11 @@ export namespace cppbuild
             if (!entry.src.logical_name.empty())
             {
                 auto pcm = build_dir / (entry.src.source_path.filename().string() + ".pcm");
-                out << "build " << pcm.string() << " | " << obj.string() << ": dyndep"
-                    << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
+                out << "build " << pcm.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
             }
             else
             {
+                auto obj = build_dir / (entry.src.source_path.filename().string() + ".o");
                 out << "build " << obj.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
             }
         }
