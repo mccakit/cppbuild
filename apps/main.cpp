@@ -90,13 +90,14 @@ auto main(int argc, char **argv) -> int
     else if (scan_srcs->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        BS::thread_pool<> pool;
         auto build_cache = cppbuild::types::build_cache::load(build_dir / "build.cache");
         auto tc_cache = cppbuild::types::toolchain::load(build_dir / "tc.cache");
-        auto scanner_output = cppbuild::load_dyndep_entries(build_dir, build_cache.build_targets);
+        auto scanner_output = cppbuild::load_dyndep_entries(build_dir, build_cache.build_targets, pool);
         auto graph = cppbuild::parse_direct_deps(scanner_output);
         auto entries = cppbuild::resolve_transitive_deps(graph);
-        cppbuild::generate_rsp(build_dir, tc_cache, build_cache.build_targets, entries);
-        cppbuild::generate_dyndep(build_dir.string(), entries);
+        cppbuild::generate_rsp(build_dir, tc_cache, build_cache.build_targets, entries, pool);
+        cppbuild::generate_dyndep(build_dir.string(), entries, pool);
     }
     else if (scan_single->parsed())
     {

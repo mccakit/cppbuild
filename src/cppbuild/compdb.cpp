@@ -223,40 +223,35 @@ export namespace cppbuild
         entry.save(cache_path);
     }
 
-    auto load_dyndep_entries(const std::filesystem::path &build_dir, const std::vector<types::build_target> &targets)
-        -> std::vector<types::dyndep_entry>
+    auto load_dyndep_entries(const std::filesystem::path &build_dir,
+                             const std::vector<types::build_target> &targets,
+                             BS::thread_pool<> &pool) -> std::vector<types::dyndep_entry>
     {
-        std::vector<types::dyndep_entry> entries;
+        std::vector<std::filesystem::path> paths;
         for (const auto &bt : targets)
         {
             for (const auto &sg : bt.srcs)
-            {
                 for (const auto &src : sg.srcs)
                 {
                     if (src.extension() == ".c")
-                    {
                         continue;
-                    }
-                    const auto bin_path = build_dir / (src.filename().string() + ".dyndep.bin");
-                    entries.push_back(types::dyndep_entry::load(bin_path));
+                    paths.push_back(build_dir / (src.filename().string() + ".dyndep.bin"));
                 }
-            }
             for (const auto &gg : bt.gen_groups)
-            {
                 for (const auto &go : gg.outputs)
                 {
                     if (go.path.extension() == ".c")
-                    {
                         continue;
-                    }
-                    const auto bin_path = build_dir / (go.path.filename().string() + ".dyndep.bin");
-                    entries.push_back(types::dyndep_entry::load(bin_path));
+                    paths.push_back(build_dir / (go.path.filename().string() + ".dyndep.bin"));
                 }
-            }
         }
+
+        std::vector<types::dyndep_entry> entries(paths.size());
+        pool.submit_loop(
+                std::size_t {0}, paths.size(), [&](std::size_t i) { entries[i] = types::dyndep_entry::load(paths[i]); })
+            .wait();
         return entries;
     }
-
     auto parse_direct_deps(const std::vector<types::dyndep_entry> &scanned)
         -> graaf::directed_graph<types::cxx_module, int>
     {

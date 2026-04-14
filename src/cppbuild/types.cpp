@@ -465,6 +465,13 @@ export namespace cppbuild::types
                     dep.print();
                 }
             }
+            auto static load_from_buffer(std::span<const std::byte> data) -> dyndep_entry
+            {
+                dyndep_entry entry {};
+                auto in = zpp::bits::in(data);
+                in(entry).or_throw();
+                return entry;
+            }
     };
 
     class build_cache
