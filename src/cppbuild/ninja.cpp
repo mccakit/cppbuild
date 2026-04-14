@@ -62,11 +62,6 @@ export namespace cppbuild
         file.print("rule scan_single\n");
         file.print("  command = {} scan_single --build-dir={} $in\n", self_path.string(), build_dir.string());
         file.print("  description = SCAN $in\n\n");
-
-        file.print("rule gen_single_p1689\n");
-        file.print("  command = {} gen_single_p1689 --build-dir={} $in\n", self_path.string(), build_dir.string());
-        file.print("  description = GEN P1689 $in\n");
-        file.print("  restat = 1\n\n");
     }
 
     auto generate_edges(fmt::ostream &file, const types::build_graph &bg) -> void
@@ -92,7 +87,7 @@ export namespace cppbuild
         }
     }
 
-    auto p1689_edges(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg)
+    auto scan_edges(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg)
         -> std::vector<std::string>
     {
         auto outputs = std::vector<std::string> {};
@@ -107,8 +102,9 @@ export namespace cppbuild
                         continue;
                     }
                     const auto db = (build_dir / (src.filename().string() + ".p1689.json")).string();
-                    file.print("build {}: gen_single_p1689 {}\n\n", db, src.string());
-                    outputs.push_back(db);
+                    const auto out = (build_dir / (src.filename().string() + ".dyndep.bin")).string();
+                    file.print("build {}: scan_single {} | {}\n\n", out, db, src.string());
+                    outputs.push_back(out);
                 }
             }
             for (auto const &gg : bt.gen_groups)
@@ -120,23 +116,11 @@ export namespace cppbuild
                         continue;
                     }
                     const auto db = (build_dir / (go.path.filename().string() + ".p1689.json")).string();
-                    file.print("build {}: gen_single_p1689 {}\n\n", db, go.path.string());
-                    outputs.push_back(db);
+                    const auto out = (build_dir / (go.path.filename().string() + ".dyndep.bin")).string();
+                    file.print("build {}: scan_single {} | {}\n\n", out, db, go.path.string());
+                    outputs.push_back(out);
                 }
             }
-        }
-        return outputs;
-    }
-
-    auto scan_edges(fmt::ostream &file, const std::vector<std::string> &p1689_outputs) -> std::vector<std::string>
-    {
-        auto outputs = std::vector<std::string> {};
-        for (const auto &db : p1689_outputs)
-        {
-            auto db_path = std::filesystem::path {db};
-            const auto out = (db_path.parent_path() / (db_path.stem().stem().string() + ".dyndep.bin")).string();
-            file.print("build {}: scan_single {}\n\n", out, db);
-            outputs.push_back(out);
         }
         return outputs;
     }
@@ -517,8 +501,7 @@ export namespace cppbuild
         auto file = fmt::output_file((opts.build_dir / "build.ninja").string());
         rules(file, opts.toolchain, opts.self_path, opts.build_dir, opts.graph);
         generate_edges(file, opts.graph);
-        auto p1689s = p1689_edges(file, opts.build_dir, opts.graph);
-        auto scans = scan_edges(file, p1689s);
+        auto scans = scan_edges(file, opts.build_dir, opts.graph);
         dyndep_edge(file, opts.build_dir, opts.graph, scans);
         precompile_named_module_edges(file, opts.graph, opts.build_dir, opts.toolchain);
         codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir);

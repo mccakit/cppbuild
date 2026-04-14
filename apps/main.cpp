@@ -36,11 +36,6 @@ auto main(int argc, char **argv) -> int
     std::string db_file_in {};
     scan_single->add_option("db_file", db_file_in, "P1689 database file")->required();
     scan_single->add_option("-B,--build-dir", build_dir_in, "Build directory");
-
-    auto gen_single_p1689 = app.add_subcommand("gen_single_p1689", "Generate P1689 database for a single source");
-    gen_single_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
-    std::string source_in {};
-    gen_single_p1689->add_option("source", source_in, "Source file")->required();
     try
     {
         app.parse(argc, argv);
@@ -76,6 +71,7 @@ auto main(int argc, char **argv) -> int
         {
             build_targets.push_back(bt);
         }
+        cppbuild::generate_compdb_per_source(build_dir, tc, build_targets);
         cppbuild::cache::save(build_dir / "cppbuild.cache", tc, build_targets, graph.link_targets);
     }
     else if (build->parsed())
@@ -106,13 +102,6 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
         auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
         cppbuild::scan_single_source(db_path, cache.tc);
-    }
-    else if (gen_single_p1689->parsed())
-    {
-        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        std::filesystem::path source {std::filesystem::weakly_canonical(source_in)};
-        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        cppbuild::generate_single_p1689(source, build_dir, cache.tc, cache.build_targets);
     }
     return 0;
 }

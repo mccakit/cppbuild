@@ -73,14 +73,14 @@ export namespace cppbuild
                   obj);
     }
 
-    auto generate_p1689_per_source(const std::filesystem::path &build_dir,
-                                   const types::toolchain &tc,
-                                   const std::vector<types::build_target> &targets) -> void
+    auto generate_compdb_per_source(const std::filesystem::path &build_dir,
+                                    const types::toolchain &tc,
+                                    const std::vector<types::build_target> &targets) -> void
     {
         const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
         const auto dir = build_dir.string();
 
-        auto write_entry = [&](const std::filesystem::path &src, std::string_view kind, const std::string &flags) {
+        auto write_db = [&](const std::filesystem::path &src, std::string_view kind, const std::string &flags) {
             if (src.extension() == ".c")
             {
                 return;
@@ -89,7 +89,6 @@ export namespace cppbuild
             const auto src_str = src.string();
             const auto obj = (build_dir / (src.filename().string() + ext)).string();
             const auto db_path = (build_dir / (src.filename().string() + ".p1689.json")).string();
-
             auto out = fmt::output_file(db_path);
             out.print("[\n"
                       "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} -c {} -o {}\",\"output\":\"{}\"}}\n"
@@ -111,14 +110,14 @@ export namespace cppbuild
             {
                 for (const auto &src : sg.srcs)
                 {
-                    write_entry(src, sg.kind, flags);
+                    write_db(src, sg.kind, flags);
                 }
             }
             for (const auto &gg : bt.gen_groups)
             {
                 for (const auto &go : gg.outputs)
                 {
-                    write_entry(go.path, go.kind, flags);
+                    write_db(go.path, go.kind, flags);
                 }
             }
         }
