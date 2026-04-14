@@ -313,87 +313,180 @@ export namespace cppbuild
         return result;
     }
 
-    auto generate_dyndep(const std::filesystem::path &build_dir, const std::vector<types::dyndep_entry> &entries)
-        -> void
+    auto generate_dyndep(const std::filesystem::path &build_dir,
+                         const std::vector<types::dyndep_entry> &entries,
+                         BS::thread_pool<> &pool) -> void
     {
-        std::ofstream out(build_dir / "deps.dd");
-        out << "ninja_dyndep_version = 1\n";
-        for (auto const &entry : entries)
+        if (entries.empty())
+            return;
+
+        std::string build_dir_str = build_dir.string();
+
+        // Result container: one string per entry
+        std::vector<std::string> results(entries.size());
+
+        // 1. Parallel Generation
+        pool.detach_blocks(std::size_t {0}, entries.size(), [&](std::size_t begin, std::size_t end) {
+            // Use a reusable memory buffer per thread block to minimize allocations
+            fmt::memory_buffer line_buf;
+
+            for (std::size_t i = begin; i < end; ++i)
+            {
+                line_buf.clear();
+                const auto &entry = entries[i];
+
+                // Determine output file (.pcm or .o)
+                std::string_view ext = entry.src.logical_name.empty() ? ".o" : ".pcm";
+
+                // Build the main line: "build build_dir/filename.ext: dyndep"
+                fmt::format_to(std::back_inserter(line_buf),
+                               "build {}/{}{}: dyndep",
+                               build_dir_str,
+                               entry.src.source_path.filename().string(),
+                               ext);
+
+                // Add implicit dependencies if they exist
+                if (!entry.deps.empty())
+                {
+                    line_buf.push_back(' ');
+                    line_buf.push_back('|');
+                    for (const auto &dep : entry.deps)
+                    {
+                        fmt::format_to(std::back_inserter(line_buf),
+                                       " {}/{}.pcm",
+                                       build_dir_str,
+                                       dep.source_path.filename().string());
+                    }
+                }
+                line_buf.push_back('\n');
+
+                // Store the rendered block
+                results[i] = fmt::to_string(line_buf);
+            }
+        });
+
+        pool.wait();
+
+        // 2. High-speed Sequential Write
+        // Using fmt::output_file is significantly faster than std::ofstream
+        auto out = fmt::output_file((build_dir / "deps.dd").string());
+        out.print("ninja_dyndep_version = 1\n");
+
+        for (const auto &line : results)
         {
-            std::string dep_pcms;
-            for (auto const &dep : entry.deps)
-            {
-                auto dep_pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
-                dep_pcms += " " + dep_pcm.string();
-            }
-            if (!entry.src.logical_name.empty())
-            {
-                auto pcm = build_dir / (entry.src.source_path.filename().string() + ".pcm");
-                out << "build " << pcm.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
-            }
-            else
-            {
-                auto obj = build_dir / (entry.src.source_path.filename().string() + ".o");
-                out << "build " << obj.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
-            }
+            out.print("{}", line);
         }
     }
 
     auto generate_rsp(const std::filesystem::path &build_dir,
                       const types::toolchain &tc,
                       const std::vector<types::build_target> &targets,
-                      const std::vector<types::dyndep_entry> &entries) -> void
+                      const std::vector<types::dyndep_entry> &entries,
+                      BS::thread_pool<> &pool) -> void
     {
+        std::string tc_cflags_str = fmt::to_string(fmt::join(tc.cflags, "\n"));
+        std::string tc_cxxflags_str = fmt::to_string(fmt::join(tc.cxxflags, "\n"));
+
+        struct target_flags
+        {
+                std::string c_flags;
+                std::string cxx_flags;
+        };
+        std::unordered_map<const types::build_target *, target_flags> precomputed_flags;
+        precomputed_flags.reserve(targets.size());
+
+        for (auto const &bt : targets)
+        {
+            precomputed_flags[&bt] = {fmt::format("{}\n{}\n{}\n",
+                                                  tc_cflags_str,
+                                                  fmt::join(bt.cflags.public_, "\n"),
+                                                  fmt::join(bt.cflags.private_, "\n")),
+                                      fmt::format("{}\n{}\n{}\n",
+                                                  tc_cxxflags_str,
+                                                  fmt::join(bt.cxxflags.public_, "\n"),
+                                                  fmt::join(bt.cxxflags.private_, "\n"))};
+        }
+
         std::unordered_map<std::string, types::dyndep_entry const *> src_to_entry;
+        src_to_entry.reserve(entries.size());
         for (auto const &entry : entries)
         {
             src_to_entry[entry.src.source_path.string()] = &entry;
         }
 
+        struct rsp_task
+        {
+                const std::filesystem::path *src;
+                const std::string *flags_to_write;
+                const types::dyndep_entry *dyndep;
+        };
+
+        std::vector<rsp_task> tasks;
+
         for (auto const &bt : targets)
         {
-            auto write_rsp = [&](const std::filesystem::path &src) {
-                auto out = fmt::output_file((build_dir / (src.filename().string() + ".rsp")).string());
-                if (src.extension() == ".c")
-                {
-                    out.print("{}\n{}\n{}\n",
-                              fmt::join(tc.cflags, "\n"),
-                              fmt::join(bt.cflags.public_, "\n"),
-                              fmt::join(bt.cflags.private_, "\n"));
-                }
-                else
-                {
-                    out.print("{}\n{}\n{}\n",
-                              fmt::join(tc.cxxflags, "\n"),
-                              fmt::join(bt.cxxflags.public_, "\n"),
-                              fmt::join(bt.cxxflags.private_, "\n"));
-                }
-                auto it = src_to_entry.find(src.string());
-                if (it == src_to_entry.end())
-                {
-                    return;
-                }
-                for (auto const &dep : it->second->deps)
-                {
-                    auto pcm = build_dir / (dep.source_path.filename().string() + ".pcm");
-                    out.print("-fmodule-file={}={}\n", dep.logical_name, pcm.string());
-                }
+            auto const &flags = precomputed_flags.at(&bt);
+
+            auto process_source = [&](const std::filesystem::path &src_path) {
+                auto it = src_to_entry.find(src_path.string());
+                bool is_c = src_path.extension() == ".c";
+                tasks.push_back({&src_path,
+                                 is_c ? &flags.c_flags : &flags.cxx_flags,
+                                 it != src_to_entry.end() ? it->second : nullptr});
             };
 
             for (auto const &sg : bt.srcs)
-            {
                 for (auto const &src : sg.srcs)
-                {
-                    write_rsp(src);
-                }
-            }
+                    process_source(src);
             for (auto const &gg : bt.gen_groups)
-            {
                 for (auto const &go : gg.outputs)
-                {
-                    write_rsp(go.path);
-                }
-            }
+                    process_source(go.path);
         }
+
+        std::string build_dir_str = build_dir.string();
+
+        pool.detach_blocks(std::size_t {0}, tasks.size(), [&](std::size_t begin, std::size_t end) {
+            for (std::size_t i = begin; i < end; ++i)
+            {
+                auto const &task = tasks[i];
+
+                std::string content = *task.flags_to_write;
+                if (task.dyndep)
+                {
+                    for (auto const &dep : task.dyndep->deps)
+                    {
+                        fmt::format_to(std::back_inserter(content),
+                                       "-fmodule-file={}={}/{}.pcm\n",
+                                       dep.logical_name,
+                                       build_dir_str,
+                                       dep.source_path.filename().string());
+                    }
+                }
+
+                std::string rsp_path = fmt::format("{}/{}.rsp", build_dir_str, task.src->filename().string());
+
+                // Skip write if content unchanged
+                std::ifstream existing(rsp_path, std::ios::binary | std::ios::ate);
+                if (existing)
+                {
+                    auto size = existing.tellg();
+                    if (static_cast<std::size_t>(size) == content.size())
+                    {
+                        std::string old(static_cast<std::size_t>(size), '\0');
+                        existing.seekg(0);
+                        existing.read(old.data(), size);
+                        if (old == content)
+                        {
+                            continue;
+                        }
+                    }
+                }
+
+                auto out = fmt::output_file(rsp_path);
+                out.print("{}", content);
+            }
+        });
+
+        pool.wait();
     }
 } // namespace cppbuild
