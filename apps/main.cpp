@@ -72,7 +72,9 @@ auto main(int argc, char **argv) -> int
             build_targets.push_back(bt);
         }
         cppbuild::generate_compdb_per_source(build_dir, tc, build_targets);
-        cppbuild::cache::save(build_dir / "cppbuild.cache", tc, build_targets, graph.link_targets);
+        cppbuild::types::build_cache cache {.build_targets = build_targets, .link_targets = graph.link_targets};
+        cache.save(build_dir / "build.cache");
+        tc.save(build_dir / "tc.cache");
     }
     else if (build->parsed())
     {
@@ -88,20 +90,20 @@ auto main(int argc, char **argv) -> int
     else if (scan_srcs->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        auto scanner_output = cppbuild::load_dyndep_entries(build_dir, cache.build_targets);
+        auto build_cache = cppbuild::types::build_cache::load(build_dir / "build.cache");
+        auto tc_cache = cppbuild::types::toolchain::load(build_dir / "tc.cache");
+        auto scanner_output = cppbuild::load_dyndep_entries(build_dir, build_cache.build_targets);
         auto graph = cppbuild::parse_direct_deps(scanner_output);
         auto entries = cppbuild::resolve_transitive_deps(graph);
-        cppbuild::generate_rsp(build_dir, cache.tc, cache.build_targets, entries);
+        cppbuild::generate_rsp(build_dir, tc_cache, build_cache.build_targets, entries);
         cppbuild::generate_dyndep(build_dir.string(), entries);
-        cppbuild::cache::save(build_dir / "cppbuild.cache", cache.tc, cache.build_targets, cache.link_targets);
     }
     else if (scan_single->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
-        auto cache = cppbuild::cache::load(build_dir / "cppbuild.cache");
-        cppbuild::scan_single_source(db_path, cache.tc);
+        auto tc = cppbuild::types::toolchain::load(build_dir / "tc.cache");
+        cppbuild::scan_single_source(db_path, tc);
     }
     return 0;
 }

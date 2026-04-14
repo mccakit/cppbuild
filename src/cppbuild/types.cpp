@@ -158,6 +158,10 @@ export namespace cppbuild::types
             std::string kind {};
             std::vector<std::string> deps {};
             std::vector<std::string> ldflags {};
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                return archive(self.name, self.kind, self.deps, self.ldflags);
+            }
     };
 
     struct install_target
@@ -253,6 +257,39 @@ export namespace cppbuild::types
                 fmt::println("cflags:         {}", fmt::join(cflags, " "));
                 fmt::println("exe_ldflags:    {}", fmt::join(exe_ldflags, " "));
                 fmt::println("shared_ldflags: {}", fmt::join(shared_ldflags, " "));
+            }
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                return archive(self.cxx_compiler,
+                               self.c_compiler,
+                               self.archiver,
+                               self.cxx_scanner,
+                               self.cxxflags,
+                               self.cflags,
+                               self.exe_ldflags,
+                               self.shared_ldflags);
+            }
+
+            auto save(const std::filesystem::path &path) const -> void
+            {
+                auto [data, out] = zpp::bits::data_out();
+                out(*this).or_throw();
+                std::ofstream f(path, std::ios::binary);
+                f.write(reinterpret_cast<const char *>(data.data()), data.size());
+            }
+
+            static auto load(const std::filesystem::path &path) -> toolchain
+            {
+                std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+                const auto size = ifs.tellg();
+                ifs.seekg(0);
+                std::vector<std::byte> data(static_cast<std::size_t>(size));
+                ifs.read(reinterpret_cast<char *>(data.data()), size);
+                toolchain tc;
+                auto in = zpp::bits::in(data);
+                in(tc).or_throw();
+                return tc;
             }
     };
 
@@ -427,6 +464,39 @@ export namespace cppbuild::types
                     fmt::print("  ");
                     dep.print();
                 }
+            }
+    };
+
+    class build_cache
+    {
+        public:
+            std::vector<build_target> build_targets {};
+            std::vector<link_target> link_targets {};
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                return archive(self.build_targets, self.link_targets);
+            }
+
+            auto save(const std::filesystem::path &path) const -> void
+            {
+                auto [data, out] = zpp::bits::data_out();
+                out(*this).or_throw();
+                std::ofstream f(path, std::ios::binary);
+                f.write(reinterpret_cast<const char *>(data.data()), data.size());
+            }
+
+            static auto load(const std::filesystem::path &path) -> build_cache
+            {
+                std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+                const auto size = ifs.tellg();
+                ifs.seekg(0);
+                std::vector<std::byte> data(static_cast<std::size_t>(size));
+                ifs.read(reinterpret_cast<char *>(data.data()), size);
+                build_cache result;
+                auto in = zpp::bits::in(data);
+                in(result).or_throw();
+                return result;
             }
     };
 } // namespace cppbuild::types
