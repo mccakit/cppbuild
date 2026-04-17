@@ -231,27 +231,36 @@ export namespace cppbuild
         for (const auto &bt : targets)
         {
             for (const auto &sg : bt.srcs)
+            {
                 for (const auto &src : sg.srcs)
                 {
                     if (src.extension() == ".c")
+                    {
                         continue;
+                    }
                     paths.push_back(build_dir / (src.filename().string() + ".dyndep.bin"));
                 }
+            }
+
             for (const auto &gg : bt.gen_groups)
+            {
                 for (const auto &go : gg.outputs)
                 {
                     if (go.path.extension() == ".c")
+                    {
                         continue;
+                    }
                     paths.push_back(build_dir / (go.path.filename().string() + ".dyndep.bin"));
                 }
+            }
         }
-
         std::vector<types::dyndep_entry> entries(paths.size());
         pool.submit_loop(
                 std::size_t {0}, paths.size(), [&](std::size_t i) { entries[i] = types::dyndep_entry::load(paths[i]); })
             .wait();
         return entries;
     }
+
     auto parse_direct_deps(const std::vector<types::dyndep_entry> &scanned)
         -> graaf::directed_graph<types::cxx_module, int>
     {
@@ -313,34 +322,23 @@ export namespace cppbuild
                          BS::thread_pool<> &pool) -> void
     {
         if (entries.empty())
+        {
             return;
-
+        }
         std::string build_dir_str = build_dir.string();
-
-        // Result container: one string per entry
         std::vector<std::string> results(entries.size());
-
-        // 1. Parallel Generation
         pool.detach_blocks(std::size_t {0}, entries.size(), [&](std::size_t begin, std::size_t end) {
-            // Use a reusable memory buffer per thread block to minimize allocations
             fmt::memory_buffer line_buf;
-
             for (std::size_t i = begin; i < end; ++i)
             {
                 line_buf.clear();
                 const auto &entry = entries[i];
-
-                // Determine output file (.pcm or .o)
                 std::string_view ext = entry.src.logical_name.empty() ? ".o" : ".pcm";
-
-                // Build the main line: "build build_dir/filename.ext: dyndep"
                 fmt::format_to(std::back_inserter(line_buf),
                                "build {}/{}{}: dyndep",
                                build_dir_str,
                                entry.src.source_path.filename().string(),
                                ext);
-
-                // Add implicit dependencies if they exist
                 if (!entry.deps.empty())
                 {
                     line_buf.push_back(' ');
@@ -354,19 +352,12 @@ export namespace cppbuild
                     }
                 }
                 line_buf.push_back('\n');
-
-                // Store the rendered block
                 results[i] = fmt::to_string(line_buf);
             }
         });
-
         pool.wait();
-
-        // 2. High-speed Sequential Write
-        // Using fmt::output_file is significantly faster than std::ofstream
         auto out = fmt::output_file((build_dir / "deps.dd").string());
         out.print("ninja_dyndep_version = 1\n");
-
         for (const auto &line : results)
         {
             out.print("{}", line);
@@ -384,6 +375,7 @@ export namespace cppbuild
 
         struct target_flags
         {
+            public:
                 std::string c_flags;
                 std::string cxx_flags;
         };
@@ -431,11 +423,19 @@ export namespace cppbuild
             };
 
             for (auto const &sg : bt.srcs)
+            {
                 for (auto const &src : sg.srcs)
+                {
                     process_source(src);
+                }
+            }
             for (auto const &gg : bt.gen_groups)
+            {
                 for (auto const &go : gg.outputs)
+                {
                     process_source(go.path);
+                }
+            }
         }
 
         std::string build_dir_str = build_dir.string();
