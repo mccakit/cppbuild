@@ -1,3 +1,4 @@
+#include <SQLiteCpp/SQLiteCpp.h>
 import std;
 import umkacxx;
 import cppbuild;
@@ -24,12 +25,6 @@ auto main(int argc, char **argv) -> int
     configure->add_option("-T,--toolchain-path", toolchain_path_in, "Compiler toolchain to use");
     configure->add_option("-B,--build-dir", build_dir_in, "Build directory");
     configure->add_option("-I,--install-dir", install_dir_in, "Installation prefix");
-
-    auto build = app.add_subcommand("build", "Execute build targets");
-    build->add_option("-B,--build-dir", build_dir_in, "Build directory");
-
-    auto install = app.add_subcommand("install", "Install build artifacts");
-    install->add_option("-B,--build-dir", build_dir_in, "Source build directory");
 
     auto gen_p1689 = app.add_subcommand("gen_p1689", "Generate P1689 database");
     gen_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
@@ -134,17 +129,6 @@ auto main(int argc, char **argv) -> int
 
         tc.save(build_dir / "tc.cache");
         cppbuild::create_db(build_dir / "deps.db");
-    }
-    else if (build->parsed())
-    {
-        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        fmt::println("Building from: {}", build_dir.string());
-    }
-    else if (install->parsed())
-    {
-        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        std::filesystem::path install_dir {std::filesystem::weakly_canonical(install_dir_in)};
-        fmt::println("Installing from {} to {}", build_dir.string(), install_dir.string());
     }
     else if (scan_single->parsed())
     {

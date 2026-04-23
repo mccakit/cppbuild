@@ -401,11 +401,9 @@ export namespace cppbuild
                 auto it = bg.name_to_id.find(dep_name);
                 if (it == bg.name_to_id.end())
                     continue;
-
                 for (const auto &dep_target : get_target_with_deps(bg, it->second))
                 {
                     const auto &dep = dep_target.get();
-
                     for (const auto &sg : dep.srcs)
                     {
                         if (sg.kind == "translation_unit")
@@ -425,7 +423,6 @@ export namespace cppbuild
                             }
                         }
                     }
-
                     for (const auto &gg : dep.gen_groups)
                     {
                         for (const auto &go : gg.outputs)
@@ -444,22 +441,22 @@ export namespace cppbuild
                     }
                 }
             }
-
             auto write_rsp = [&](const std::string &rsp_path) {
                 std::filesystem::create_directories(std::filesystem::path(rsp_path).parent_path());
                 auto rsp = fmt::output_file(rsp_path);
+                for (const auto &flag : toolchain.arflags)
+                {
+                    rsp.print("{}\n", flag);
+                }
                 for (const auto &obj : objs)
                 {
                     rsp.print("{}\n", obj);
                 }
             };
-
             auto objs_implicit = fmt::format(" | {}", fmt::join(objs, " "));
             auto out_path = (build_dir / ("lib" + at.name + ".a")).string();
-            auto rsp_path = (build_dir / ("lib" + at.name + ".a.link.rsp")).string();
-
+            auto rsp_path = (build_dir / (at.name + ".rsp")).string();
             write_rsp(rsp_path);
-
             file.print("build {}: archive{}\n", out_path, objs_implicit);
             file.print("  rsp = {}\n", rsp_path);
             file.print("\n");

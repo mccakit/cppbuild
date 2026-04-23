@@ -217,8 +217,10 @@ export namespace cppbuild::types
             std::string c_compiler;
             std::string archiver;
             std::string cxx_scanner;
+            std::string libcxx_modules_manifest;
             std::vector<std::string> cxxflags;
             std::vector<std::string> cflags;
+            std::vector<std::string> arflags;
             std::vector<std::string> exe_ldflags;
             std::vector<std::string> shared_ldflags;
 
@@ -276,23 +278,27 @@ export namespace cppbuild::types
                 try_string("c_compiler", c_compiler);
                 try_string("archiver", archiver);
                 try_string("cxx_scanner", cxx_scanner);
+                try_string("libcxx_modules_manifest", libcxx_modules_manifest);
 
                 cxxflags = parse_flags("cxxflags");
                 cflags = parse_flags("cflags");
+                arflags = parse_flags("arflags");
                 exe_ldflags = parse_flags("exe_ldflags");
                 shared_ldflags = parse_flags("shared_ldflags");
             }
 
             auto print() const -> void
             {
-                fmt::println("cxx_compiler:   {}", cxx_compiler);
-                fmt::println("c_compiler:     {}", c_compiler);
-                fmt::println("archiver:       {}", archiver);
-                fmt::println("cxx_scanner:    {}", cxx_scanner);
-                fmt::println("cxxflags:       {}", fmt::join(cxxflags, " "));
-                fmt::println("cflags:         {}", fmt::join(cflags, " "));
-                fmt::println("exe_ldflags:    {}", fmt::join(exe_ldflags, " "));
-                fmt::println("shared_ldflags: {}", fmt::join(shared_ldflags, " "));
+                fmt::println("cxx_compiler:            {}", cxx_compiler);
+                fmt::println("c_compiler:              {}", c_compiler);
+                fmt::println("archiver:                {}", archiver);
+                fmt::println("cxx_scanner:             {}", cxx_scanner);
+                fmt::println("libcxx_modules_manifest: {}", libcxx_modules_manifest);
+                fmt::println("cxxflags:                {}", fmt::join(cxxflags, " "));
+                fmt::println("cflags:                  {}", fmt::join(cflags, " "));
+                fmt::println("arflags:                 {}", fmt::join(arflags, " "));
+                fmt::println("exe_ldflags:             {}", fmt::join(exe_ldflags, " "));
+                fmt::println("shared_ldflags:          {}", fmt::join(shared_ldflags, " "));
             }
 
             constexpr static auto serialize(auto &archive, auto &self)
@@ -301,8 +307,10 @@ export namespace cppbuild::types
                                self.c_compiler,
                                self.archiver,
                                self.cxx_scanner,
+                               self.libcxx_modules_manifest,
                                self.cxxflags,
                                self.cflags,
+                               self.arflags,
                                self.exe_ldflags,
                                self.shared_ldflags);
             }

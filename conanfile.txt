@@ -8,3 +8,4 @@ glaze/modules
 zppbits/main
 thread_pool/main
 lmdbxx/main
+sqlitecpp/master
