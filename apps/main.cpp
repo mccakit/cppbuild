@@ -5,6 +5,7 @@ import fmt;
 import bs.thread_pool;
 import cli11;
 import lmdbxx;
+import zpp.bits;
 using CLI::App;
 
 auto main(int argc, char **argv) -> int
@@ -79,8 +80,40 @@ auto main(int argc, char **argv) -> int
             build_targets.push_back(bt);
         }
         cppbuild::generate_compdb_per_source(build_dir, tc, build_targets);
-        cppbuild::types::build_cache cache {.build_targets = build_targets, .link_targets = graph.link_targets};
-        cache.save(build_dir / "build.cache");
+        cppbuild::create_db(build_dir / "config.db");
+        {
+            auto env = cppbuild::load_db(build_dir / "config.db");
+            auto txn = lmdbxx::txn::begin(env);
+            auto dbi = lmdbxx::dbi::open(txn, nullptr);
+
+            for (const auto &bt : build_targets)
+            {
+                cppbuild::db_put_struct(dbi, txn, "bt:" + bt.name, bt);
+
+                for (const auto &sg : bt.srcs)
+                {
+                    for (const auto &src : sg.srcs)
+                    {
+                        cppbuild::db_put_raw(dbi, txn, "src:" + src.string(), bt.name);
+                    }
+                }
+
+                for (const auto &gg : bt.gen_groups)
+                {
+                    for (const auto &go : gg.outputs)
+                    {
+                        cppbuild::db_put_raw(dbi, txn, "src:" + go.path.string(), bt.name);
+                    }
+                }
+            }
+
+            for (const auto &lt : graph.link_targets)
+            {
+                cppbuild::db_put_struct(dbi, txn, "lt:" + lt.name, lt);
+            }
+
+            txn.commit();
+        }
         tc.save(build_dir / "tc.cache");
         cppbuild::create_db(build_dir / "deps.db");
     }
@@ -108,18 +141,19 @@ auto main(int argc, char **argv) -> int
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
-        auto lmdb_path = build_dir / "deps.db";
-        auto env = cppbuild::load_db(lmdb_path, lmdbxx::env_flags::rdonly);
-        cppbuild::generate_single_dyndep(src_path, build_dir, env);
+        auto deps_env = cppbuild::load_db(build_dir / "deps.db", lmdbxx::env_flags::rdonly);
+        auto config_env = cppbuild::load_db(build_dir / "config.db", lmdbxx::env_flags::rdonly);
+        cppbuild::generate_single_dyndep(src_path, build_dir, deps_env, config_env);
     }
     else if (gen_single_rsp->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
-        auto lmdb_path = build_dir / "deps.db";
-        auto env = cppbuild::load_db(lmdb_path, lmdbxx::env_flags::rdonly);
-        cppbuild::generate_single_rsp(src_path, build_dir, env);
-    }
+        auto deps_env = cppbuild::load_db(build_dir / "deps.db", lmdbxx::env_flags::rdonly);
+        auto config_env =
+            cppbuild::load_db(build_dir / "config.db", lmdbxx::env_flags::rdonly | lmdbxx::env_flags::no_lock);
 
+        cppbuild::generate_single_rsp(src_path, build_dir, deps_env, config_env);
+    }
     return 0;
 }

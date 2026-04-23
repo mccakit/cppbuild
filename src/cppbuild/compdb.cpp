@@ -214,7 +214,6 @@ export namespace cppbuild
                 for (auto &req : it->second.get<glz::generic::array_t>())
                 {
                     auto &req_obj = req.get<glz::generic::object_t>();
-                    // Push the logical name directly as a string
                     entry.deps.push_back(req_obj["logical-name"].get<std::string>());
                 }
             }
@@ -223,89 +222,112 @@ export namespace cppbuild
         {
             return;
         }
-        auto [data, out] = zpp::bits::data_out();
-        out(entry).or_throw();
-
         try
         {
-            // Begin transaction using the provided environment and open the default database
             auto txn = lmdbxx::txn::begin(env);
             auto dbi = lmdbxx::dbi::open(txn);
-
-            // Insert primary record
-            auto key_str = entry.src.source_path.string();
-            std::string_view value_sv {reinterpret_cast<const char *>(data.data()), data.size()};
-            dbi.put(txn, key_str, value_sv);
-
-            // Insert logical name index if applicable
+            // Primary record
+            db_put_struct(dbi, txn, entry.src.source_path.string(), entry);
+            // Logical name index
             if (!entry.src.logical_name.empty())
             {
-                auto name_key_str = "n:" + entry.src.logical_name;
-                auto name_val_str = entry.src.source_path.string();
-                dbi.put(txn, name_key_str, name_val_str);
+                db_put_raw(dbi, txn, "n:" + entry.src.logical_name, entry.src.source_path.string());
             }
-
             txn.commit();
         }
         catch (const lmdbxx::error &)
         {
-            // Silently return on error, matching the original code's behavior
-            // RAII will automatically clean up the txn and dbi handles
             return;
         }
-
         auto stamp_path = db_path.parent_path() / (db_path.stem().stem().string() + ".scan.stamp");
         std::ofstream stamp(stamp_path);
     }
 
     auto generate_single_dyndep(const std::filesystem::path &src_path,
                                 const std::filesystem::path &build_dir,
-                                lmdbxx::env &env) -> void
+                                lmdbxx::env &deps_env,
+                                lmdbxx::env &config_env) -> void
     {
-        types::dyndep_entry entry {};
-        std::vector<std::filesystem::path> direct {};
-
+        // Step 1: find owner target from config.db, collect its direct deps + own sources.
+        // For .dd files, we only need direct deps — transitive walking happens in .rsp generation.
+        types::build_target owner {};
+        std::unordered_set<std::string> allowed_sources;
         try
         {
-            // Begin a read-only transaction using the provided environment
-            auto txn = lmdbxx::txn::begin(env, nullptr, lmdbxx::env_flags::rdonly);
+            auto txn = lmdbxx::txn::begin(config_env, nullptr, lmdbxx::env_flags::rdonly);
             auto dbi = lmdbxx::dbi::open(txn);
 
-            auto self_key_str = src_path.string();
-            std::string_view self_val_sv;
-
-            // Fetch the primary entry
-            if (!dbi.get(txn, self_key_str, self_val_sv))
+            auto owner_name = db_get_raw(dbi, txn, "src:" + src_path.string());
+            if (!owner_name)
             {
                 return;
             }
 
-            // Convert string_view back to std::span<const std::byte>
-            std::span<const std::byte> self_bytes {reinterpret_cast<const std::byte *>(self_val_sv.data()),
-                                                   self_val_sv.size()};
-            entry = types::dyndep_entry::load_from_buffer(self_bytes);
-
-            // Fetch dependencies
-            for (auto const &dep_logical_name : entry.deps)
+            auto owner_opt = db_get_struct<types::build_target>(dbi, txn, "bt:" + *owner_name);
+            if (!owner_opt)
             {
-                // dep_logical_name is now directly the string
-                auto name_key_str = "n:" + dep_logical_name;
-                std::string_view name_val_sv;
-                if (dbi.get(txn, name_key_str, name_val_sv))
+                return;
+            }
+            owner = std::move(*owner_opt);
+
+            auto collect = [&](const types::build_target &bt) {
+                for (auto const &sg : bt.srcs)
+                    for (auto const &src : sg.srcs)
+                        allowed_sources.insert(src.string());
+                for (auto const &gg : bt.gen_groups)
+                    for (auto const &go : gg.outputs)
+                        allowed_sources.insert(go.path.string());
+            };
+
+            collect(owner);
+
+            // Direct deps only — no transitive walk.
+            for (auto const &dep_name : owner.deps)
+            {
+                if (auto dep_bt = db_get_struct<types::build_target>(dbi, txn, "bt:" + dep_name))
                 {
-                    direct.emplace_back(name_val_sv);
+                    collect(*dep_bt);
                 }
             }
-
-            // Read-only transaction is automatically aborted here by RAII, releasing the read lock
         }
         catch (const lmdbxx::error &)
         {
-            // Silently return on database errors, matching original logic
             return;
         }
 
-        // Generate the Ninja dyndep file
+        // Step 2: fetch dyndep_entry for this source, resolve its deps via deps.db,
+        // filtering by allowed_sources.
+        types::dyndep_entry entry {};
+        std::vector<std::filesystem::path> direct;
+        try
+        {
+            auto txn = lmdbxx::txn::begin(deps_env, nullptr, lmdbxx::env_flags::rdonly);
+            auto dbi = lmdbxx::dbi::open(txn);
+
+            auto self_entry = db_get_struct<types::dyndep_entry>(dbi, txn, src_path.string());
+            if (!self_entry)
+            {
+                return;
+            }
+            entry = std::move(*self_entry);
+
+            for (auto const &logical_name : entry.deps)
+            {
+                if (auto src = db_get_raw(dbi, txn, "n:" + logical_name))
+                {
+                    if (allowed_sources.contains(*src))
+                    {
+                        direct.emplace_back(*src);
+                    }
+                }
+            }
+        }
+        catch (const lmdbxx::error &)
+        {
+            return;
+        }
+
+        // Step 3: generate the Ninja dyndep file.
         auto dd_path = build_dir / (entry.src.source_path.filename().string() + ".dd");
         std::ofstream dd(dd_path);
         dd << "ninja_dyndep_version = 1\n";
@@ -315,7 +337,6 @@ export namespace cppbuild
             auto dep_pcm = build_dir / (dep_src.filename().string() + ".pcm");
             dep_pcms += " " + dep_pcm.string();
         }
-
         if (!entry.src.logical_name.empty())
         {
             auto pcm = build_dir / (entry.src.source_path.filename().string() + ".pcm");
@@ -330,116 +351,129 @@ export namespace cppbuild
 
     auto generate_single_rsp(const std::filesystem::path &src_path,
                              const std::filesystem::path &build_dir,
-                             lmdbxx::env &env) -> void
+                             lmdbxx::env &deps_env,
+                             lmdbxx::env &config_env) -> void
     {
         auto tc = types::toolchain::load(build_dir / "tc.cache");
-        auto build_cache = types::build_cache::load(build_dir / "build.cache");
 
-        const types::build_target *owner = nullptr;
-        for (auto const &bt : build_cache.build_targets)
+        // Step 1: find owner target, BFS deps transitively, collect allowed sources.
+        types::build_target owner {};
+        std::unordered_set<std::string> allowed_sources;
+        try
         {
-            for (auto const &sg : bt.srcs)
+            auto txn = lmdbxx::txn::begin(config_env, nullptr, lmdbxx::env_flags::rdonly);
+            auto dbi = lmdbxx::dbi::open(txn);
+
+            auto owner_name = db_get_raw(dbi, txn, "src:" + src_path.string());
+            if (!owner_name)
             {
-                for (auto const &src : sg.srcs)
+                return;
+            }
+
+            auto owner_opt = db_get_struct<types::build_target>(dbi, txn, "bt:" + *owner_name);
+            if (!owner_opt)
+            {
+                return;
+            }
+            owner = std::move(*owner_opt);
+
+            auto collect = [&](const types::build_target &bt) {
+                for (auto const &sg : bt.srcs)
+                    for (auto const &src : sg.srcs)
+                        allowed_sources.insert(src.string());
+                for (auto const &gg : bt.gen_groups)
+                    for (auto const &go : gg.outputs)
+                        allowed_sources.insert(go.path.string());
+            };
+
+            collect(owner);
+
+            std::unordered_set<std::string> visited_targets;
+            std::queue<std::string> frontier;
+            visited_targets.insert(*owner_name);
+            for (auto const &dep_name : owner.deps)
+            {
+                if (visited_targets.insert(dep_name).second)
                 {
-                    if (src == src_path)
+                    frontier.push(dep_name);
+                }
+            }
+
+            while (!frontier.empty())
+            {
+                auto name = std::move(frontier.front());
+                frontier.pop();
+
+                auto bt = db_get_struct<types::build_target>(dbi, txn, "bt:" + name);
+                if (!bt)
+                {
+                    continue;
+                }
+                collect(*bt);
+
+                for (auto const &dep_name : bt->deps)
+                {
+                    if (visited_targets.insert(dep_name).second)
                     {
-                        owner = &bt;
-                        break;
+                        frontier.push(dep_name);
                     }
                 }
-                if (owner)
-                {
-                    break;
-                }
-            }
-            if (owner)
-            {
-                break;
-            }
-            for (auto const &gg : bt.gen_groups)
-            {
-                for (auto const &go : gg.outputs)
-                {
-                    if (go.path == src_path)
-                    {
-                        owner = &bt;
-                        break;
-                    }
-                }
-                if (owner)
-                {
-                    break;
-                }
-            }
-            if (owner)
-            {
-                break;
             }
         }
-
-        if (!owner)
+        catch (const lmdbxx::error &)
         {
             return;
         }
 
+        // Step 2: build flag string from owner + toolchain.
         bool is_c = src_path.extension() == ".c";
         std::string content;
         if (is_c)
         {
             content = fmt::format("{}\n{}\n{}\n",
                                   fmt::join(tc.cflags, "\n"),
-                                  fmt::join(owner->cflags.public_, "\n"),
-                                  fmt::join(owner->cflags.private_, "\n"));
+                                  fmt::join(owner.cflags.public_, "\n"),
+                                  fmt::join(owner.cflags.private_, "\n"));
         }
         else
         {
             content = fmt::format("{}\n{}\n{}\n",
                                   fmt::join(tc.cxxflags, "\n"),
-                                  fmt::join(owner->cxxflags.public_, "\n"),
-                                  fmt::join(owner->cxxflags.private_, "\n"));
+                                  fmt::join(owner.cxxflags.public_, "\n"),
+                                  fmt::join(owner.cxxflags.private_, "\n"));
         }
 
+        // Step 3: BFS deps.db from src_path, filtering resolution by allowed_sources.
         if (!is_c)
         {
             try
             {
-                // Begin read-only transaction using the provided environment
-                auto txn = lmdbxx::txn::begin(env, nullptr, lmdbxx::env_flags::rdonly);
+                auto txn = lmdbxx::txn::begin(deps_env, nullptr, lmdbxx::env_flags::rdonly);
                 auto dbi = lmdbxx::dbi::open(txn);
 
                 auto load_entry = [&](const std::filesystem::path &src) -> std::optional<types::dyndep_entry> {
-                    std::string_view value_sv;
-                    if (!dbi.get(txn, src.string(), value_sv))
-                    {
-                        return std::nullopt;
-                    }
-                    std::span<const std::byte> bytes {reinterpret_cast<const std::byte *>(value_sv.data()),
-                                                      value_sv.size()};
-                    return types::dyndep_entry::load_from_buffer(bytes);
+                    return db_get_struct<types::dyndep_entry>(dbi, txn, src.string());
                 };
 
                 auto lookup_name = [&](const std::string &name) -> std::filesystem::path {
-                    auto key_str = "n:" + name;
-                    std::string_view value_sv;
-                    if (!dbi.get(txn, key_str, value_sv))
+                    auto src = db_get_raw(dbi, txn, "n:" + name);
+                    if (!src || !allowed_sources.contains(*src))
                     {
                         return {};
                     }
-                    return std::filesystem::path(value_sv);
+                    return *src;
                 };
 
-                std::unordered_set<std::string> visited {};
-                std::queue<std::string> frontier {};
+                std::unordered_set<std::string> visited;
+                std::queue<std::string> frontier;
 
                 if (auto self_entry = load_entry(src_path); self_entry)
                 {
-                    for (auto const &dep_logical_name : self_entry->deps)
+                    for (auto const &logical_name : self_entry->deps)
                     {
-                        if (visited.insert(dep_logical_name).second)
+                        if (visited.insert(logical_name).second)
                         {
-                            // dep_logical_name is now a string
-                            frontier.push(dep_logical_name);
+                            frontier.push(logical_name);
                         }
                     }
                 }
@@ -463,12 +497,11 @@ export namespace cppbuild
 
                     if (auto dep_entry = load_entry(dep_src); dep_entry)
                     {
-                        for (auto const &next_logical_name : dep_entry->deps)
+                        for (auto const &next_name : dep_entry->deps)
                         {
-                            if (visited.insert(next_logical_name).second)
+                            if (visited.insert(next_name).second)
                             {
-                                // next_logical_name is now a string
-                                frontier.push(next_logical_name);
+                                frontier.push(next_name);
                             }
                         }
                     }
@@ -476,8 +509,7 @@ export namespace cppbuild
             }
             catch (const lmdbxx::error &)
             {
-                // Silently swallow database errors and proceed without module flags,
-                // matching the behavior of the original C code.
+                // Swallow db errors and proceed without module flags.
             }
         }
 
