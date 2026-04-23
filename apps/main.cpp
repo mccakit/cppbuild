@@ -116,7 +116,7 @@ auto main(int argc, char **argv) -> int
         using ms = std::chrono::duration<double, std::milli>;
         auto t0 = std::chrono::steady_clock::now();
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        std::filesystem::path src_path {std::filesystem::weakly_canonical(rsp_src_in)};
+        std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
         cppbuild::generate_single_rsp(src_path, build_dir);
         auto t1 = std::chrono::steady_clock::now();
         fmt::println("Gen single rsp           : {:.2f} ms", ms(t1 - t0).count());

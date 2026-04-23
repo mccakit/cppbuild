@@ -1,5 +1,4 @@
 module;
-#include <lmdb.h>
 export module cppbuild:compdb;
 import std;
 import graaf;
@@ -7,7 +6,7 @@ import fmt;
 import subprocess;
 import glaze;
 import bs.thread_pool;
-
+import lmdbxx;
 import :types;
 
 export namespace cppbuild
@@ -227,54 +226,40 @@ export namespace cppbuild
         auto [data, out] = zpp::bits::data_out();
         out(entry).or_throw();
         auto lmdb_path = db_path.parent_path() / "deps.db";
-        MDB_env *env = nullptr;
-        if (mdb_env_create(&env) != 0)
+
+        try
         {
-            return;
-        }
-        mdb_env_set_mapsize(env, static_cast<std::size_t>(1) << 30);
-        if (mdb_env_open(env, lmdb_path.string().c_str(), MDB_NOSUBDIR, 0644) != 0)
-        {
-            mdb_env_close(env);
-            return;
-        }
-        MDB_txn *txn = nullptr;
-        if (mdb_txn_begin(env, nullptr, 0, &txn) != 0)
-        {
-            mdb_env_close(env);
-            return;
-        }
-        MDB_dbi dbi {};
-        if (mdb_dbi_open(txn, nullptr, 0, &dbi) != 0)
-        {
-            mdb_txn_abort(txn);
-            mdb_env_close(env);
-            return;
-        }
-        auto key_str = entry.src.source_path.string();
-        MDB_val key {key_str.size(), key_str.data()};
-        MDB_val value {data.size(), data.data()};
-        if (mdb_put(txn, dbi, &key, &value, 0) != 0)
-        {
-            mdb_txn_abort(txn);
-            mdb_env_close(env);
-            return;
-        }
-        if (!entry.src.logical_name.empty())
-        {
-            auto name_key_str = "n:" + entry.src.logical_name;
-            auto name_val_str = entry.src.source_path.string();
-            MDB_val name_key {name_key_str.size(), name_key_str.data()};
-            MDB_val name_val {name_val_str.size(), name_val_str.data()};
-            if (mdb_put(txn, dbi, &name_key, &name_val, 0) != 0)
+            // Set up the environment
+            auto env = lmdbxx::env::create();
+            env.set_mapsize(static_cast<std::size_t>(1) << 30);
+            env.open(lmdb_path, lmdbxx::env_flags::no_subdir, 0644);
+
+            // Begin transaction and open the default database
+            auto txn = lmdbxx::txn::begin(env);
+            auto dbi = lmdbxx::dbi::open(txn);
+
+            // Insert primary record
+            auto key_str = entry.src.source_path.string();
+            std::string_view value_sv {reinterpret_cast<const char *>(data.data()), data.size()};
+            dbi.put(txn, key_str, value_sv);
+
+            // Insert logical name index if applicable
+            if (!entry.src.logical_name.empty())
             {
-                mdb_txn_abort(txn);
-                mdb_env_close(env);
-                return;
+                auto name_key_str = "n:" + entry.src.logical_name;
+                auto name_val_str = entry.src.source_path.string();
+                dbi.put(txn, name_key_str, name_val_str);
             }
+
+            txn.commit();
         }
-        mdb_txn_commit(txn);
-        mdb_env_close(env);
+        catch (const lmdbxx::error &)
+        {
+            // Silently return on error, matching the original code's behavior
+            // RAII will automatically clean up the txn, dbi, and env handles
+            return;
+        }
+
         auto stamp_path = db_path.parent_path() / (db_path.stem().stem().string() + ".scan.stamp");
         std::ofstream stamp(stamp_path);
     }
@@ -282,55 +267,54 @@ export namespace cppbuild
     auto generate_single_dyndep(const std::filesystem::path &src_path, const std::filesystem::path &build_dir) -> void
     {
         auto lmdb_path = build_dir / "deps.db";
-        MDB_env *env = nullptr;
-        if (mdb_env_create(&env) != 0)
-        {
-            return;
-        }
-        mdb_env_set_mapsize(env, static_cast<std::size_t>(1) << 30);
-        if (mdb_env_open(env, lmdb_path.string().c_str(), MDB_NOSUBDIR | MDB_RDONLY, 0644) != 0)
-        {
-            mdb_env_close(env);
-            return;
-        }
-        MDB_txn *txn = nullptr;
-        if (mdb_txn_begin(env, nullptr, MDB_RDONLY, &txn) != 0)
-        {
-            mdb_env_close(env);
-            return;
-        }
-        MDB_dbi dbi {};
-        if (mdb_dbi_open(txn, nullptr, 0, &dbi) != 0)
-        {
-            mdb_txn_abort(txn);
-            mdb_env_close(env);
-            return;
-        }
-        auto self_key_str = src_path.string();
-        MDB_val self_key {self_key_str.size(), self_key_str.data()};
-        MDB_val self_val {};
-        if (mdb_get(txn, dbi, &self_key, &self_val) != 0)
-        {
-            mdb_txn_abort(txn);
-            mdb_env_close(env);
-            return;
-        }
-        std::span<const std::byte> self_bytes {static_cast<const std::byte *>(self_val.mv_data), self_val.mv_size};
-        auto entry = types::dyndep_entry::load_from_buffer(self_bytes);
+        types::dyndep_entry entry {};
         std::vector<std::filesystem::path> direct {};
-        for (auto const &dep : entry.deps)
+
+        try
         {
-            auto name_key_str = "n:" + dep.logical_name;
-            MDB_val name_key {name_key_str.size(), name_key_str.data()};
-            MDB_val name_val {};
-            if (mdb_get(txn, dbi, &name_key, &name_val) != 0)
+            // Set up the read-only environment
+            auto env = lmdbxx::env::create();
+            env.set_mapsize(static_cast<std::size_t>(1) << 30);
+            env.open(lmdb_path, lmdbxx::env_flags::no_subdir | lmdbxx::env_flags::rdonly, 0644);
+
+            // Begin a read-only transaction and open the default database
+            auto txn = lmdbxx::txn::begin(env, nullptr, lmdbxx::env_flags::rdonly);
+            auto dbi = lmdbxx::dbi::open(txn);
+
+            auto self_key_str = src_path.string();
+            std::string_view self_val_sv;
+
+            // Fetch the primary entry
+            if (!dbi.get(txn, self_key_str, self_val_sv))
             {
-                continue;
+                return;
             }
-            direct.emplace_back(std::string_view(static_cast<const char *>(name_val.mv_data), name_val.mv_size));
+
+            // Convert string_view back to std::span<const std::byte>
+            std::span<const std::byte> self_bytes {reinterpret_cast<const std::byte *>(self_val_sv.data()),
+                                                   self_val_sv.size()};
+            entry = types::dyndep_entry::load_from_buffer(self_bytes);
+
+            // Fetch dependencies
+            for (auto const &dep : entry.deps)
+            {
+                auto name_key_str = "n:" + dep.logical_name;
+                std::string_view name_val_sv;
+                if (dbi.get(txn, name_key_str, name_val_sv))
+                {
+                    direct.emplace_back(name_val_sv);
+                }
+            }
+
+            // Read-only transaction is automatically aborted here by RAII, releasing the read lock
         }
-        mdb_txn_abort(txn);
-        mdb_env_close(env);
+        catch (const lmdbxx::error &)
+        {
+            // Silently return on database errors, matching original logic
+            return;
+        }
+
+        // Generate the Ninja dyndep file
         auto dd_path = build_dir / (entry.src.source_path.filename().string() + ".dd");
         std::ofstream dd(dd_path);
         dd << "ninja_dyndep_version = 1\n";
@@ -340,6 +324,7 @@ export namespace cppbuild
             auto dep_pcm = build_dir / (dep_src.filename().string() + ".pcm");
             dep_pcms += " " + dep_pcm.string();
         }
+
         if (!entry.src.logical_name.empty())
         {
             auto pcm = build_dir / (entry.src.source_path.filename().string() + ".pcm");
@@ -425,91 +410,83 @@ export namespace cppbuild
         if (!is_c)
         {
             auto lmdb_path = build_dir / "deps.db";
-            MDB_env *env = nullptr;
-            if (mdb_env_create(&env) == 0)
+            try
             {
-                mdb_env_set_mapsize(env, static_cast<std::size_t>(1) << 30);
-                if (mdb_env_open(env, lmdb_path.string().c_str(), MDB_NOSUBDIR | MDB_RDONLY, 0644) == 0)
-                {
-                    MDB_txn *txn = nullptr;
-                    if (mdb_txn_begin(env, nullptr, MDB_RDONLY, &txn) == 0)
+                auto env = lmdbxx::env::create();
+                env.set_mapsize(static_cast<std::size_t>(1) << 30);
+                env.open(lmdb_path, lmdbxx::env_flags::no_subdir | lmdbxx::env_flags::rdonly, 0644);
+
+                auto txn = lmdbxx::txn::begin(env, nullptr, lmdbxx::env_flags::rdonly);
+                auto dbi = lmdbxx::dbi::open(txn);
+
+                auto load_entry = [&](const std::filesystem::path &src) -> std::optional<types::dyndep_entry> {
+                    std::string_view value_sv;
+                    if (!dbi.get(txn, src.string(), value_sv))
                     {
-                        MDB_dbi dbi {};
-                        if (mdb_dbi_open(txn, nullptr, 0, &dbi) == 0)
+                        return std::nullopt;
+                    }
+                    std::span<const std::byte> bytes {reinterpret_cast<const std::byte *>(value_sv.data()),
+                                                      value_sv.size()};
+                    return types::dyndep_entry::load_from_buffer(bytes);
+                };
+
+                auto lookup_name = [&](const std::string &name) -> std::filesystem::path {
+                    auto key_str = "n:" + name;
+                    std::string_view value_sv;
+                    if (!dbi.get(txn, key_str, value_sv))
+                    {
+                        return {};
+                    }
+                    return std::filesystem::path(value_sv);
+                };
+
+                std::unordered_set<std::string> visited {};
+                std::queue<std::string> frontier {};
+
+                if (auto self_entry = load_entry(src_path); self_entry)
+                {
+                    for (auto const &dep : self_entry->deps)
+                    {
+                        if (visited.insert(dep.logical_name).second)
                         {
-                            auto load_entry =
-                                [&](const std::filesystem::path &src) -> std::optional<types::dyndep_entry> {
-                                auto key_str = src.string();
-                                MDB_val key {key_str.size(), key_str.data()};
-                                MDB_val value {};
-                                if (mdb_get(txn, dbi, &key, &value) != 0)
-                                {
-                                    return std::nullopt;
-                                }
-                                std::span<const std::byte> bytes {static_cast<const std::byte *>(value.mv_data),
-                                                                  value.mv_size};
-                                return types::dyndep_entry::load_from_buffer(bytes);
-                            };
-
-                            auto lookup_name = [&](const std::string &name) -> std::filesystem::path {
-                                auto key_str = "n:" + name;
-                                MDB_val key {key_str.size(), key_str.data()};
-                                MDB_val value {};
-                                if (mdb_get(txn, dbi, &key, &value) != 0)
-                                {
-                                    return {};
-                                }
-                                return std::filesystem::path(
-                                    std::string_view(static_cast<const char *>(value.mv_data), value.mv_size));
-                            };
-
-                            std::unordered_set<std::string> visited {};
-                            std::queue<std::string> frontier {};
-
-                            if (auto self_entry = load_entry(src_path); self_entry)
-                            {
-                                for (auto const &dep : self_entry->deps)
-                                {
-                                    if (visited.insert(dep.logical_name).second)
-                                    {
-                                        frontier.push(dep.logical_name);
-                                    }
-                                }
-                            }
-
-                            while (!frontier.empty())
-                            {
-                                auto name = std::move(frontier.front());
-                                frontier.pop();
-
-                                auto dep_src = lookup_name(name);
-                                if (dep_src.empty())
-                                {
-                                    continue;
-                                }
-
-                                fmt::format_to(std::back_inserter(content),
-                                               "-fmodule-file={}={}/{}.pcm\n",
-                                               name,
-                                               build_dir.string(),
-                                               dep_src.filename().string());
-
-                                if (auto dep_entry = load_entry(dep_src); dep_entry)
-                                {
-                                    for (auto const &next : dep_entry->deps)
-                                    {
-                                        if (visited.insert(next.logical_name).second)
-                                        {
-                                            frontier.push(next.logical_name);
-                                        }
-                                    }
-                                }
-                            }
+                            frontier.push(dep.logical_name);
                         }
-                        mdb_txn_abort(txn);
                     }
                 }
-                mdb_env_close(env);
+
+                while (!frontier.empty())
+                {
+                    auto name = std::move(frontier.front());
+                    frontier.pop();
+
+                    auto dep_src = lookup_name(name);
+                    if (dep_src.empty())
+                    {
+                        continue;
+                    }
+
+                    fmt::format_to(std::back_inserter(content),
+                                   "-fmodule-file={}={}/{}.pcm\n",
+                                   name,
+                                   build_dir.string(),
+                                   dep_src.filename().string());
+
+                    if (auto dep_entry = load_entry(dep_src); dep_entry)
+                    {
+                        for (auto const &next : dep_entry->deps)
+                        {
+                            if (visited.insert(next.logical_name).second)
+                            {
+                                frontier.push(next.logical_name);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (const lmdbxx::error &)
+            {
+                // Silently swallow database errors and proceed without module flags,
+                // matching the behavior of the original C code.
             }
         }
 

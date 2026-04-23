@@ -6,6 +6,7 @@ pkg_check_modules(SUBPROCESS REQUIRED IMPORTED_TARGET subprocess)
 pkg_check_modules(GLAZE REQUIRED IMPORTED_TARGET glaze)
 pkg_check_modules(ZPPBITS REQUIRED IMPORTED_TARGET zppbits)
 pkg_check_modules(THREAD_POOL REQUIRED IMPORTED_TARGET thread_pool)
+pkg_check_modules(LMDBXX REQUIRED IMPORTED_TARGET lmdbxx)
 
 file(
     GLOB_RECURSE cppbuild_srcs
@@ -24,5 +25,5 @@ target_link_libraries(
         PkgConfig::GLAZE
         PkgConfig::ZPPBITS
         PkgConfig::THREAD_POOL
-        lmdb
+        PkgConfig::LMDBXX
 )
