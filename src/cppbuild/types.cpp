@@ -8,10 +8,10 @@ import zpp.bits;
 import :modules_cppbuild;
 export namespace cppbuild::types
 {
-    struct source_group
+    class source_group
     {
         public:
-            std::string kind {};
+            std::string kind;
             std::vector<std::filesystem::path> srcs;
 
             constexpr static auto serialize(auto &archive, auto &self)
@@ -39,11 +39,11 @@ export namespace cppbuild::types
             }
     };
 
-    struct gen_output
+    class gen_output
     {
         public:
-            std::filesystem::path path {};
-            std::string kind {};
+            std::filesystem::path path;
+            std::string kind;
 
             constexpr static auto serialize(auto &archive, auto &self)
             {
@@ -61,12 +61,12 @@ export namespace cppbuild::types
             }
     };
 
-    struct gen_group
+    class gen_group
     {
         public:
-            std::vector<std::string> command {};
-            std::vector<std::filesystem::path> inputs {};
-            std::vector<gen_output> outputs {};
+            std::vector<std::string> command;
+            std::vector<std::filesystem::path> inputs;
+            std::vector<gen_output> outputs;
 
             constexpr static auto serialize(auto &archive, auto &self)
             {
@@ -93,29 +93,29 @@ export namespace cppbuild::types
             }
     };
 
-    struct cxx_flags
+    class cxx_flags
+    {
+        public:
+            std::vector<std::string> public_;
+            std::vector<std::string> private_;
+    };
+
+    class c_flags
     {
         public:
             std::vector<std::string> public_ {};
             std::vector<std::string> private_ {};
     };
 
-    struct c_flags
+    class build_target
     {
         public:
-            std::vector<std::string> public_ {};
-            std::vector<std::string> private_ {};
-    };
-
-    struct build_target
-    {
-        public:
-            std::string name {};
-            std::vector<source_group> srcs {};
-            std::vector<gen_group> gen_groups {};
-            std::vector<std::string> deps {};
-            cxx_flags cxxflags {};
-            c_flags cflags {};
+            std::string name;
+            std::vector<source_group> srcs;
+            std::vector<gen_group> gen_groups;
+            std::vector<std::string> deps;
+            cxx_flags cxxflags;
+            c_flags cflags;
 
             constexpr static auto serialize(auto &archive, auto &self)
             {
@@ -151,40 +151,40 @@ export namespace cppbuild::types
             }
     };
 
-    struct link_target
+    class link_target
     {
         public:
-            std::string name {};
-            std::string kind {};
-            std::vector<std::string> deps {};
-            std::vector<std::string> ldflags {};
+            std::string name;
+            std::string kind;
+            std::vector<std::string> deps;
+            std::vector<std::string> ldflags;
             constexpr static auto serialize(auto &archive, auto &self)
             {
                 return archive(self.name, self.kind, self.deps, self.ldflags);
             }
     };
 
-    struct install_target
+    class install_target
     {
         public:
-            std::string name {};
-            std::filesystem::path install_dir {};
-            std::vector<std::string> files {};
-            std::vector<std::string> build_targets {};
-            std::vector<std::string> link_targets {};
+            std::string name;
+            std::filesystem::path install_dir;
+            std::vector<std::string> files;
+            std::vector<std::string> build_targets;
+            std::vector<std::string> link_targets;
     };
 
     class toolchain
     {
         public:
-            std::string cxx_compiler {};
-            std::string c_compiler {};
-            std::string archiver {};
-            std::string cxx_scanner {};
-            std::vector<std::string> cxxflags {};
-            std::vector<std::string> cflags {};
-            std::vector<std::string> exe_ldflags {};
-            std::vector<std::string> shared_ldflags {};
+            std::string cxx_compiler;
+            std::string c_compiler;
+            std::string archiver;
+            std::string cxx_scanner;
+            std::vector<std::string> cxxflags;
+            std::vector<std::string> cflags;
+            std::vector<std::string> exe_ldflags;
+            std::vector<std::string> shared_ldflags;
 
             auto parse(const std::filesystem::path &path) -> void
             {
@@ -297,10 +297,10 @@ export namespace cppbuild::types
     {
         public:
             graaf::directed_graph<build_target, int> graph {};
-            std::unordered_map<std::string, graaf::vertex_id_t> name_to_id {};
-            std::vector<graaf::vertex_id_t> topo_order {};
-            std::vector<link_target> link_targets {};
-            std::vector<install_target> install_targets {};
+            std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
+            std::vector<graaf::vertex_id_t> topo_order;
+            std::vector<link_target> link_targets;
+            std::vector<install_target> install_targets;
             auto parse(modules_cppbuild::results_cxx results,
                        const std::filesystem::path &script_path,
                        const std::filesystem::path &build_dir) -> void
@@ -403,8 +403,8 @@ export namespace cppbuild::types
     class cxx_module
     {
         public:
-            std::string logical_name {};
-            std::filesystem::path source_path {};
+            std::string logical_name;
+            std::filesystem::path source_path;
 
             constexpr static auto serialize(auto &archive, auto &self)
             {
@@ -476,8 +476,8 @@ export namespace cppbuild::types
     class build_cache
     {
         public:
-            std::vector<build_target> build_targets {};
-            std::vector<link_target> link_targets {};
+            std::vector<build_target> build_targets;
+            std::vector<link_target> link_targets;
 
             constexpr static auto serialize(auto &archive, auto &self)
             {
