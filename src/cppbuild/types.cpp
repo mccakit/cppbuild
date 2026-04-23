@@ -431,7 +431,7 @@ export namespace cppbuild::types
     {
         public:
             cxx_module src;
-            std::vector<cxx_module> deps;
+            std::vector<std::string> deps;
 
             constexpr static auto serialize(auto &archive, auto &self)
             {
@@ -461,8 +461,7 @@ export namespace cppbuild::types
                 src.print();
                 for (auto const &dep : deps)
                 {
-                    fmt::print("  ");
-                    dep.print();
+                    fmt::print("  {}\n", dep);
                 }
             }
             auto static load_from_buffer(std::span<const std::byte> data) -> dyndep_entry

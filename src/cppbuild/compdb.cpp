@@ -214,9 +214,8 @@ export namespace cppbuild
                 for (auto &req : it->second.get<glz::generic::array_t>())
                 {
                     auto &req_obj = req.get<glz::generic::object_t>();
-                    types::cxx_module dep {};
-                    dep.logical_name = req_obj["logical-name"].get<std::string>();
-                    entry.deps.push_back(std::move(dep));
+                    // Push the logical name directly as a string
+                    entry.deps.push_back(req_obj["logical-name"].get<std::string>());
                 }
             }
         }
@@ -287,9 +286,10 @@ export namespace cppbuild
             entry = types::dyndep_entry::load_from_buffer(self_bytes);
 
             // Fetch dependencies
-            for (auto const &dep : entry.deps)
+            for (auto const &dep_logical_name : entry.deps)
             {
-                auto name_key_str = "n:" + dep.logical_name;
+                // dep_logical_name is now directly the string
+                auto name_key_str = "n:" + dep_logical_name;
                 std::string_view name_val_sv;
                 if (dbi.get(txn, name_key_str, name_val_sv))
                 {
@@ -434,11 +434,12 @@ export namespace cppbuild
 
                 if (auto self_entry = load_entry(src_path); self_entry)
                 {
-                    for (auto const &dep : self_entry->deps)
+                    for (auto const &dep_logical_name : self_entry->deps)
                     {
-                        if (visited.insert(dep.logical_name).second)
+                        if (visited.insert(dep_logical_name).second)
                         {
-                            frontier.push(dep.logical_name);
+                            // dep_logical_name is now a string
+                            frontier.push(dep_logical_name);
                         }
                     }
                 }
@@ -462,11 +463,12 @@ export namespace cppbuild
 
                     if (auto dep_entry = load_entry(dep_src); dep_entry)
                     {
-                        for (auto const &next : dep_entry->deps)
+                        for (auto const &next_logical_name : dep_entry->deps)
                         {
-                            if (visited.insert(next.logical_name).second)
+                            if (visited.insert(next_logical_name).second)
                             {
-                                frontier.push(next.logical_name);
+                                // next_logical_name is now a string
+                                frontier.push(next_logical_name);
                             }
                         }
                     }
