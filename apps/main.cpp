@@ -72,7 +72,6 @@ auto main(int argc, char **argv) -> int
                                      .build_dir = build_dir.string(),
                                      .self_path = std::filesystem::weakly_canonical(argv[0])});
         cppbuild::write_ninja_install({.graph = graph, .build_dir = build_dir, .prefix = install_dir});
-
         std::vector<cppbuild::types::build_target> build_targets;
         build_targets.reserve(graph.graph.vertex_count());
         for (const auto &[id, bt] : graph.graph.get_vertices())
@@ -83,7 +82,7 @@ auto main(int argc, char **argv) -> int
         cppbuild::types::build_cache cache {.build_targets = build_targets, .link_targets = graph.link_targets};
         cache.save(build_dir / "build.cache");
         tc.save(build_dir / "tc.cache");
-        cppbuild::create_deps_db(build_dir);
+        cppbuild::create_db(build_dir / "deps.db");
     }
     else if (build->parsed())
     {
@@ -102,7 +101,7 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
         auto tc = cppbuild::types::toolchain::load(build_dir / "tc.cache");
         auto lmdb_path = db_path.parent_path() / "deps.db";
-        auto env = cppbuild::open_deps_env(lmdb_path);
+        auto env = cppbuild::load_db(lmdb_path);
         cppbuild::scan_single_source(db_path, tc, env);
     }
     else if (gen_single_dd->parsed())
@@ -110,7 +109,7 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
         auto lmdb_path = build_dir / "deps.db";
-        auto env = cppbuild::open_deps_env(lmdb_path, lmdbxx::env_flags::rdonly);
+        auto env = cppbuild::load_db(lmdb_path, lmdbxx::env_flags::rdonly);
         cppbuild::generate_single_dyndep(src_path, build_dir, env);
     }
     else if (gen_single_rsp->parsed())
@@ -118,8 +117,9 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
         auto lmdb_path = build_dir / "deps.db";
-        auto env = cppbuild::open_deps_env(lmdb_path, lmdbxx::env_flags::rdonly);
+        auto env = cppbuild::load_db(lmdb_path, lmdbxx::env_flags::rdonly);
         cppbuild::generate_single_rsp(src_path, build_dir, env);
     }
+
     return 0;
 }

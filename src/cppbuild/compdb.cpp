@@ -8,6 +8,7 @@ import glaze;
 import bs.thread_pool;
 import lmdbxx;
 import :types;
+import :cache;
 
 export namespace cppbuild
 {
@@ -172,38 +173,6 @@ export namespace cppbuild
         }
 
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
-    }
-
-    auto create_deps_db(const std::filesystem::path &build_dir) -> void
-    {
-        auto lmdb_path = build_dir / "deps.db";
-        try
-        {
-            // Set up and create the environment file
-            auto env = lmdbxx::env::create();
-            env.set_mapsize(static_cast<std::size_t>(1) << 30);
-            env.open(lmdb_path, lmdbxx::env_flags::no_subdir, 0644);
-
-            // Begin a transaction and open the default database with the create flag
-            // to ensure internal structures are fully initialized.
-            auto txn = lmdbxx::txn::begin(env);
-            auto dbi = lmdbxx::dbi::open(txn, nullptr, lmdbxx::db_flags::create);
-            txn.commit();
-        }
-        catch (const lmdbxx::error &e)
-        {
-            std::println(std::cerr, "Failed to initialize deps database: {} (code: {})", e.what(), e.code());
-            std::exit(1);
-        }
-    }
-
-    auto open_deps_env(const std::filesystem::path &lmdb_path,
-                       lmdbxx::env_flags additional_flags = lmdbxx::env_flags::none) -> lmdbxx::env
-    {
-        auto env = lmdbxx::env::create();
-        env.set_mapsize(static_cast<std::size_t>(1) << 30); // 1GB map size
-        env.open(lmdb_path, lmdbxx::env_flags::no_subdir | additional_flags, 0644);
-        return env;
     }
 
     auto scan_single_source(const std::filesystem::path &db_path, const types::toolchain &tc, lmdbxx::env &env) -> void
