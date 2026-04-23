@@ -6,6 +6,7 @@ import graaf;
 import glaze;
 import zpp.bits;
 import :modules_cppbuild;
+
 export namespace cppbuild::types
 {
     class source_group
@@ -151,6 +152,19 @@ export namespace cppbuild::types
             }
     };
 
+    class archive_target
+    {
+        public:
+            std::string name;
+            std::vector<std::string> deps;
+            std::vector<std::string> arflags;
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                return archive(self.name, self.deps, self.arflags);
+            }
+    };
+
     class link_target
     {
         public:
@@ -158,6 +172,7 @@ export namespace cppbuild::types
             std::string kind;
             std::vector<std::string> deps;
             std::vector<std::string> ldflags;
+
             constexpr static auto serialize(auto &archive, auto &self)
             {
                 return archive(self.name, self.kind, self.deps, self.ldflags);
@@ -171,7 +186,28 @@ export namespace cppbuild::types
             std::filesystem::path install_dir;
             std::vector<std::string> files;
             std::vector<std::string> build_targets;
+            std::vector<std::string> archive_targets;
             std::vector<std::string> link_targets;
+
+            constexpr static auto serialize(auto &archive, auto &self)
+            {
+                std::string install_dir_str;
+                if constexpr (archive.kind() == zpp::bits::kind::out)
+                {
+                    install_dir_str = self.install_dir.string();
+                }
+                auto result = archive(self.name,
+                                      install_dir_str,
+                                      self.files,
+                                      self.build_targets,
+                                      self.archive_targets,
+                                      self.link_targets);
+                if constexpr (archive.kind() == zpp::bits::kind::in)
+                {
+                    self.install_dir = install_dir_str;
+                }
+                return result;
+            }
     };
 
     class toolchain
@@ -299,8 +335,10 @@ export namespace cppbuild::types
             graaf::directed_graph<build_target, int> graph {};
             std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
             std::vector<graaf::vertex_id_t> topo_order;
+            std::vector<archive_target> archive_targets;
             std::vector<link_target> link_targets;
             std::vector<install_target> install_targets;
+
             auto parse(modules_cppbuild::results_cxx results,
                        const std::filesystem::path &script_path,
                        const std::filesystem::path &build_dir) -> void
@@ -308,6 +346,7 @@ export namespace cppbuild::types
                 std::string target_name {};
                 target_name.reserve(256);
                 const std::filesystem::path src_dir = script_path.parent_path();
+
                 name_to_id.reserve(results.build_targets.size());
                 for (auto &bt_raw : results.build_targets)
                 {
@@ -317,6 +356,7 @@ export namespace cppbuild::types
                                                              .private_ = std::move(bt_raw.cxxflags.private_)},
                                                 .cflags = {.public_ = std::move(bt_raw.cflags.public_),
                                                            .private_ = std::move(bt_raw.cflags.private_)}};
+
                     target.srcs.reserve(bt_raw.srcs.size());
                     for (auto &sg_raw : bt_raw.srcs)
                     {
@@ -350,6 +390,7 @@ export namespace cppbuild::types
                     name_to_id[target_name] = graph.add_vertex(std::move(target));
                     target_name.clear();
                 }
+
                 for (const auto &[name, id] : name_to_id)
                 {
                     const auto &vertex_data = graph.get_vertex(id);
@@ -360,6 +401,14 @@ export namespace cppbuild::types
                             graph.add_edge(id, it->second, 1);
                         }
                     }
+                }
+
+                archive_targets.reserve(results.archive_targets.size());
+                for (auto &at_raw : results.archive_targets)
+                {
+                    archive_targets.push_back({.name = std::move(at_raw.name),
+                                               .deps = std::move(at_raw.deps),
+                                               .arflags = std::move(at_raw.arflags)});
                 }
 
                 link_targets.reserve(results.link_targets.size());
@@ -380,13 +429,16 @@ export namespace cppbuild::types
                     {
                         files.push_back(std::filesystem::weakly_canonical(src_dir / f).string());
                     }
+
                     install_targets.push_back({.name = std::move(it_raw.name),
                                                .install_dir = std::move(it_raw.install_dir),
                                                .files = std::move(files),
                                                .build_targets = std::move(it_raw.build_targets),
+                                               .archive_targets = std::move(it_raw.archive_targets),
                                                .link_targets = std::move(it_raw.link_targets)});
                 }
             }
+
             auto order() -> bool
             {
                 auto result = graaf::algorithm::dfs_topological_sort(graph);
@@ -437,6 +489,7 @@ export namespace cppbuild::types
             {
                 return archive(self.src, self.deps);
             }
+
             auto save(const std::filesystem::path &path) const -> void
             {
                 auto [data, out] = zpp::bits::data_out();
@@ -444,6 +497,7 @@ export namespace cppbuild::types
                 std::ofstream f(path, std::ios::binary);
                 f.write(reinterpret_cast<const char *>(data.data()), data.size());
             }
+
             auto static load(const std::filesystem::path &path) -> dyndep_entry
             {
                 std::ifstream ifs(path, std::ios::binary | std::ios::ate);
@@ -456,6 +510,7 @@ export namespace cppbuild::types
                 in(entry).or_throw();
                 return entry;
             }
+
             auto print() const -> void
             {
                 src.print();
@@ -464,6 +519,7 @@ export namespace cppbuild::types
                     fmt::print("  {}\n", dep);
                 }
             }
+
             auto static load_from_buffer(std::span<const std::byte> data) -> dyndep_entry
             {
                 dyndep_entry entry {};
@@ -477,11 +533,12 @@ export namespace cppbuild::types
     {
         public:
             std::vector<build_target> build_targets;
+            std::vector<archive_target> archive_targets;
             std::vector<link_target> link_targets;
 
             constexpr static auto serialize(auto &archive, auto &self)
             {
-                return archive(self.build_targets, self.link_targets);
+                return archive(self.build_targets, self.archive_targets, self.link_targets);
             }
 
             auto save(const std::filesystem::path &path) const -> void

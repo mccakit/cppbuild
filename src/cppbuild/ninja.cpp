@@ -387,39 +387,47 @@ export namespace cppbuild
         file.print("\n");
     }
 
-    auto link_edges(fmt::ostream &file,
-                    const types::build_graph &bg,
-                    const types::toolchain &toolchain,
-                    const std::filesystem::path &src_root,
-                    const std::filesystem::path &build_dir) -> void
+    auto archive_edges(fmt::ostream &file,
+                       const types::build_graph &bg,
+                       const types::toolchain &toolchain,
+                       const std::filesystem::path &src_root,
+                       const std::filesystem::path &build_dir) -> void
     {
-        for (const auto &lt : bg.link_targets)
+        for (const auto &at : bg.archive_targets)
         {
             std::vector<std::string> objs;
-            for (const auto &dep_name : lt.deps)
+            for (const auto &dep_name : at.deps)
             {
                 auto it = bg.name_to_id.find(dep_name);
                 if (it == bg.name_to_id.end())
                     continue;
+
                 for (const auto &dep_target : get_target_with_deps(bg, it->second))
                 {
                     const auto &dep = dep_target.get();
+
                     for (const auto &sg : dep.srcs)
                     {
                         if (sg.kind == "translation_unit")
+                        {
                             for (const auto &src : sg.srcs)
                             {
                                 auto base = calc_output_path(src, src_root, build_dir);
                                 objs.push_back(base.string() + ".o");
                             }
+                        }
                         else if (sg.kind == "named_module")
+                        {
                             for (const auto &src : sg.srcs)
                             {
                                 auto base = calc_output_path(src, src_root, build_dir);
                                 objs.push_back(base.string() + ".pcm.o");
                             }
+                        }
                     }
+
                     for (const auto &gg : dep.gen_groups)
+                    {
                         for (const auto &go : gg.outputs)
                         {
                             if (go.kind == "translation_unit")
@@ -433,6 +441,7 @@ export namespace cppbuild
                                 objs.push_back(base.string() + ".pcm.o");
                             }
                         }
+                    }
                 }
             }
 
@@ -446,13 +455,103 @@ export namespace cppbuild
             };
 
             auto objs_implicit = fmt::format(" | {}", fmt::join(objs, " "));
+            auto out_path = (build_dir / ("lib" + at.name + ".a")).string();
+            auto rsp_path = (build_dir / ("lib" + at.name + ".a.link.rsp")).string();
+
+            write_rsp(rsp_path);
+
+            file.print("build {}: archive{}\n", out_path, objs_implicit);
+            file.print("  rsp = {}\n", rsp_path);
+            file.print("\n");
+        }
+    }
+
+    auto link_edges(fmt::ostream &file,
+                    const types::build_graph &bg,
+                    const types::toolchain &toolchain,
+                    const std::filesystem::path &src_root,
+                    const std::filesystem::path &build_dir) -> void
+    {
+        for (const auto &lt : bg.link_targets)
+        {
+            std::vector<std::string> inputs;
+
+            for (const auto &dep_name : lt.deps)
+            {
+                if (auto bt_it = bg.name_to_id.find(dep_name); bt_it != bg.name_to_id.end())
+                {
+                    for (const auto &dep_target : get_target_with_deps(bg, bt_it->second))
+                    {
+                        const auto &dep = dep_target.get();
+
+                        for (const auto &sg : dep.srcs)
+                        {
+                            if (sg.kind == "translation_unit")
+                            {
+                                for (const auto &src : sg.srcs)
+                                {
+                                    auto base = calc_output_path(src, src_root, build_dir);
+                                    inputs.push_back(base.string() + ".o");
+                                }
+                            }
+                            else if (sg.kind == "named_module")
+                            {
+                                for (const auto &src : sg.srcs)
+                                {
+                                    auto base = calc_output_path(src, src_root, build_dir);
+                                    inputs.push_back(base.string() + ".pcm.o");
+                                }
+                            }
+                        }
+
+                        for (const auto &gg : dep.gen_groups)
+                        {
+                            for (const auto &go : gg.outputs)
+                            {
+                                if (go.kind == "translation_unit")
+                                {
+                                    auto base = calc_output_path(go.path, src_root, build_dir);
+                                    inputs.push_back(base.string() + ".o");
+                                }
+                                else if (go.kind == "named_module")
+                                {
+                                    auto base = calc_output_path(go.path, src_root, build_dir);
+                                    inputs.push_back(base.string() + ".pcm.o");
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                for (const auto &at : bg.archive_targets)
+                {
+                    if (at.name == dep_name)
+                    {
+                        inputs.push_back((build_dir / ("lib" + at.name + ".a")).string());
+                        break;
+                    }
+                }
+            }
+
+            auto write_rsp = [&](const std::string &rsp_path) {
+                std::filesystem::create_directories(std::filesystem::path(rsp_path).parent_path());
+                auto rsp = fmt::output_file(rsp_path);
+                for (const auto &input : inputs)
+                {
+                    rsp.print("{}\n", input);
+                }
+            };
+
+            auto inputs_implicit = fmt::format(" | {}", fmt::join(inputs, " "));
 
             if (lt.kind == "executable")
             {
                 auto out_path = (build_dir / lt.name).string();
                 auto rsp_path = (build_dir / (lt.name + ".link.rsp")).string();
                 write_rsp(rsp_path);
-                file.print("build {}: link{}\n", out_path, objs_implicit);
+
+                file.print("build {}: link{}\n", out_path, inputs_implicit);
                 file.print("  rsp = {}\n", rsp_path);
                 file.print("  ldflags = {} {}\n", fmt::join(toolchain.exe_ldflags, " "), fmt::join(lt.ldflags, " "));
                 file.print("\n");
@@ -462,20 +561,12 @@ export namespace cppbuild
                 auto out_path = (build_dir / ("lib" + lt.name + ".so")).string();
                 auto rsp_path = (build_dir / ("lib" + lt.name + ".so.link.rsp")).string();
                 write_rsp(rsp_path);
-                file.print("build {}: link{}\n", out_path, objs_implicit);
+
+                file.print("build {}: link{}\n", out_path, inputs_implicit);
                 file.print("  rsp = {}\n", rsp_path);
                 file.print("  ldflags = {} {} -shared\n",
                            fmt::join(toolchain.shared_ldflags, " "),
                            fmt::join(lt.ldflags, " "));
-                file.print("\n");
-            }
-            else if (lt.kind == "static_library")
-            {
-                auto out_path = (build_dir / ("lib" + lt.name + ".a")).string();
-                auto rsp_path = (build_dir / ("lib" + lt.name + ".a.link.rsp")).string();
-                write_rsp(rsp_path);
-                file.print("build {}: archive{}\n", out_path, objs_implicit);
-                file.print("  rsp = {}\n", rsp_path);
                 file.print("\n");
             }
         }
@@ -588,6 +679,7 @@ export namespace cppbuild
         dd_edges(file, opts.src_root, opts.build_dir, srcs);
         precompile_named_module_edges(file, opts.graph, opts.src_root, opts.build_dir, opts.toolchain);
         codegen_edges(file, opts.graph, opts.toolchain, opts.src_root, opts.build_dir);
+        archive_edges(file, opts.graph, opts.toolchain, opts.src_root, opts.build_dir);
         link_edges(file, opts.graph, opts.toolchain, opts.src_root, opts.build_dir);
     }
 

@@ -1,55 +1,64 @@
 type source_files* = struct {
-    kind:      str
-    srcs:      []str
+    kind: str
+    srcs: []str
 }
 
 type gen_output* = struct {
-    path:        str
-    kind:        str
+    path: str
+    kind: str
 }
 
 type gen_srcs* = struct {
     command: []str
-    inputs:  []str
+    inputs: []str
     outputs: []gen_output
 }
 
 type cxx_flags* = struct {
-    public:  []str
+    public: []str
     private: []str
 }
+
 type c_flags* = struct {
-    public:  []str
+    public: []str
     private: []str
 }
 
 type build_target* = struct {
-    name:     str
-    srcs:     []source_files
+    name: str
+    srcs: []source_files
     gen_groups: []gen_srcs
-    deps:     []str
+    deps: []str
     cxxflags: cxx_flags
-    cflags:   c_flags
+    cflags: c_flags
+}
+
+type archive_target* = struct {
+    name: str
+    deps: []str
+    arflags: []str
 }
 
 type link_target* = struct {
-    name:    str
-    kind:    str
-    deps:    []str
+    name: str
+    kind: str
+    deps: []str
     ldflags: []str
 }
 
 type install_target* = struct {
-    name:        str
+    name: str
     install_dir: str
-    files:         []str
+    files: []str
     build_targets: []str
-    link_targets:  []str
+    archive_targets: []str
+    link_targets: []str
 }
 
 type results* = struct {
-    build_targets:   []build_target
-    link_targets:    []link_target
+    build_targets: []build_target
+    archive_targets: []archive_target
+    link_targets: []link_target
     install_targets: []install_target
 }
 
@@ -58,9 +67,15 @@ var build_config*: results
 fn add_build_target*(opts: build_target) {
     build_config.build_targets = append(build_config.build_targets, opts)
 }
+
+fn add_archive_target*(opts: archive_target) {
+    build_config.archive_targets = append(build_config.archive_targets, opts)
+}
+
 fn add_link_target*(opts: link_target) {
     build_config.link_targets = append(build_config.link_targets, opts)
 }
+
 fn add_install_target*(opts: install_target) {
     build_config.install_targets = append(build_config.install_targets, opts)
 }

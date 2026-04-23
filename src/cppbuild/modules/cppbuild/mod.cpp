@@ -151,6 +151,28 @@ struct build_target_cxx
         }
 };
 
+struct archive_target_umka
+{
+    public:
+        umkacxx::types::str_t name;
+        umkacxx::types::arr_t<umkacxx::types::str_t> deps;
+        umkacxx::types::arr_t<umkacxx::types::str_t> arflags;
+};
+
+struct archive_target_cxx
+{
+    public:
+        std::string name {};
+        std::vector<std::string> deps {};
+        std::vector<std::string> arflags {};
+
+        archive_target_cxx(const archive_target_umka &raw)
+            : name {raw.name ? raw.name : ""}, deps {raw.deps.data, raw.deps.data + raw.deps.len()},
+              arflags {raw.arflags.data, raw.arflags.data + raw.arflags.len()}
+        {
+        }
+};
+
 struct link_target_umka
 {
     public:
@@ -182,6 +204,7 @@ struct install_target_umka
         umkacxx::types::str_t install_dir;
         umkacxx::types::arr_t<umkacxx::types::str_t> files;
         umkacxx::types::arr_t<umkacxx::types::str_t> build_targets;
+        umkacxx::types::arr_t<umkacxx::types::str_t> archive_targets;
         umkacxx::types::arr_t<umkacxx::types::str_t> link_targets;
 };
 
@@ -192,11 +215,13 @@ struct install_target_cxx
         std::filesystem::path install_dir {};
         std::vector<std::string> files {};
         std::vector<std::string> build_targets {};
+        std::vector<std::string> archive_targets {};
         std::vector<std::string> link_targets {};
         install_target_cxx(const install_target_umka &raw)
             : name {raw.name ? raw.name : ""}, install_dir {raw.install_dir ? raw.install_dir : ""},
               files {raw.files.data, raw.files.data + raw.files.len()},
               build_targets {raw.build_targets.data, raw.build_targets.data + raw.build_targets.len()},
+              archive_targets {raw.archive_targets.data, raw.archive_targets.data + raw.archive_targets.len()},
               link_targets {raw.link_targets.data, raw.link_targets.data + raw.link_targets.len()}
         {
         }
@@ -205,10 +230,12 @@ struct install_target_cxx
 export namespace cppbuild::modules_cppbuild
 {
     umkacxx::types::module_t mod {"cppbuild.um", src, {}};
+
     struct results_umka
     {
         public:
             umkacxx::types::arr_t<build_target_umka> build_targets;
+            umkacxx::types::arr_t<archive_target_umka> archive_targets;
             umkacxx::types::arr_t<link_target_umka> link_targets;
             umkacxx::types::arr_t<install_target_umka> install_targets;
     };
@@ -217,6 +244,7 @@ export namespace cppbuild::modules_cppbuild
     {
         public:
             std::vector<build_target_cxx> build_targets {};
+            std::vector<archive_target_cxx> archive_targets {};
             std::vector<link_target_cxx> link_targets {};
             std::vector<install_target_cxx> install_targets {};
 
@@ -229,6 +257,14 @@ export namespace cppbuild::modules_cppbuild
                     build_targets.emplace_back(raw.build_targets.data[i]);
                 }
                 raw.build_targets.decref(vm);
+
+                auto alen = raw.archive_targets.len();
+                archive_targets.reserve(alen);
+                for (int i = 0; i < alen; ++i)
+                {
+                    archive_targets.emplace_back(raw.archive_targets.data[i]);
+                }
+                raw.archive_targets.decref(vm);
 
                 auto llen = raw.link_targets.len();
                 link_targets.reserve(llen);
@@ -246,6 +282,7 @@ export namespace cppbuild::modules_cppbuild
                 }
                 raw.install_targets.decref(vm);
             }
+
             auto print() const -> void
             {
                 std::println("=== Build Targets ({}) ===", build_targets.size());
@@ -268,6 +305,16 @@ export namespace cppbuild::modules_cppbuild
                     }
                 }
 
+                std::println("=== Archive Targets ({}) ===", archive_targets.size());
+                for (auto &at : archive_targets)
+                {
+                    std::println("  name: {}", at.name);
+                    for (auto &d : at.deps)
+                    {
+                        std::println("    - {}", d);
+                    }
+                }
+
                 std::println("=== Link Targets ({}) ===", link_targets.size());
                 for (auto &lt : link_targets)
                 {
@@ -285,6 +332,10 @@ export namespace cppbuild::modules_cppbuild
                     for (auto &bt : it.build_targets)
                     {
                         std::println("    build: {}", bt);
+                    }
+                    for (auto &at : it.archive_targets)
+                    {
+                        std::println("    archive: {}", at);
                     }
                     for (auto &lt : it.link_targets)
                     {

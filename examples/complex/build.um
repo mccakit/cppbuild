@@ -2,6 +2,7 @@ import (
     "std.um"
     "cppbuild.um"
 )
+
 fn configure*(): cppbuild::results {
     cppbuild::add_build_target({
         name: "mathlib",
@@ -13,6 +14,7 @@ fn configure*(): cppbuild::results {
         cxxflags: {public: {}, private: {}},
         cflags: {public: {"-I" + cppbuild::script_dir}, private: {}}
     })
+
     cppbuild::add_build_target({
         name: "strlib",
         srcs: {
@@ -23,6 +25,7 @@ fn configure*(): cppbuild::results {
         cxxflags: {public: {}, private: {}},
         cflags: {public: {}, private: {}}
     })
+
     cppbuild::add_build_target({
         name: "config",
         srcs: {},
@@ -47,6 +50,7 @@ fn configure*(): cppbuild::results {
         cxxflags: {public: {}, private: {}},
         cflags: {public: {}, private: {}}
     })
+
     cppbuild::add_build_target({
         name: "app",
         srcs: {
@@ -57,27 +61,35 @@ fn configure*(): cppbuild::results {
         cxxflags: {public: {"-I" + cppbuild::script_dir}, private: {}},
         cflags: {public: {}, private: {}}
     })
+
     cppbuild::add_link_target({
         name: "app",
         kind: "executable",
-        deps: {"app"}
+        deps: {"app"},
+        ldflags: {}
     })
-    cppbuild::add_link_target({
+
+    cppbuild::add_archive_target({
         name: "mathlib",
-        kind: "static_library",
-        deps: {"mathlib"}
+        deps: {"mathlib"},
+        arflags: {}
     })
+
     cppbuild::add_link_target({
         name: "strlib",
         kind: "shared_library",
-        deps: {"strlib"}
+        deps: {"strlib"},
+        ldflags: {}
     })
+
     cppbuild::add_install_target({
         name: "default",
         install_dir: "./install",
         build_targets: {"strlib", "config"},
-        link_targets: {"app", "mathlib", "strlib"},
+        archive_targets: {"mathlib"},
+        link_targets: {"app", "strlib"},
         files: {"mathlib.h"},
     })
+
     return cppbuild::build_config
 }

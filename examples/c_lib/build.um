@@ -2,6 +2,7 @@ import (
     "std.um"
     "cppbuild.um"
 )
+
 fn configure*(): cppbuild::results {
     cppbuild::add_build_target({
         name: "mylib",
@@ -13,15 +14,19 @@ fn configure*(): cppbuild::results {
         cxxflags: {public: {}, private: {}},
         cflags: {public: {"-I" + cppbuild::script_dir}, private: {}}
     })
-    cppbuild::add_link_target({
+
+    cppbuild::add_archive_target({
         name: "mylib_static",
-        kind: "static_library",
-        deps: {"mylib"}
+        deps: {"mylib"},
+        arflags: {}
     })
+
     cppbuild::add_link_target({
         name: "mylib_shared",
         kind: "shared_library",
-        deps: {"mylib"}
+        deps: {"mylib"},
+        ldflags: {}
     })
+
     return cppbuild::build_config
 }

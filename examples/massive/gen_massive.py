@@ -4,16 +4,18 @@
 Structure: DEPTH levels, WIDTH modules per level.
 Each module at level N imports one module from level N-1.
 Level 0 modules have no imports.
-All .cppm files are generated at build time by codegen.py.
+All generated .cppm files are produced at build time by codegen.py.
 
-Total sources = DEPTH * WIDTH
+Also includes mod.c++ as a named module source.
+
+Total generated modules = DEPTH * WIDTH
 """
 
 import os
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--depth", type=int, default=100)
+parser.add_argument("--depth", type=int, default=20)
 parser.add_argument("--width", type=int, default=500)
 parser.add_argument("--output-dir", type=str, default=".")
 args = parser.parse_args()
@@ -28,7 +30,6 @@ os.makedirs(OUT, exist_ok=True)
 def mod_name(level, idx):
     return f"m_{level:04d}_{idx:04d}"
 
-# Generate codegen.py
 codegen_path = os.path.join(OUT, "codegen.py")
 with open(codegen_path, "w") as f:
     f.write('''#!/usr/bin/env python3
@@ -62,7 +63,11 @@ for level in range(args.depth):
                 out.write(f"export int {name}_val() {{ return {dep}_val() + 1; }}\\n")
 ''')
 
-# Generate build.um
+try:
+    os.chmod(codegen_path, 0o755)
+except OSError:
+    pass
+
 build_um_path = os.path.join(OUT, "build.um")
 with open(build_um_path, "w") as f:
     f.write('import (\n')
@@ -73,7 +78,9 @@ with open(build_um_path, "w") as f:
 
     f.write('    cppbuild::add_build_target({\n')
     f.write('        name: "massive",\n')
-    f.write('        srcs: {},\n')
+    f.write('        srcs: {\n')
+    f.write('            {kind: "named_module", srcs: {"mod.c++"}}\n')
+    f.write('        },\n')
     f.write('        gen_groups: {\n')
     f.write('            {\n')
     f.write('                command: {\n')
@@ -89,7 +96,7 @@ with open(build_um_path, "w") as f:
     for level in range(DEPTH):
         for idx in range(WIDTH):
             name = mod_name(level, idx)
-            is_last = (level == DEPTH - 1 and idx == WIDTH - 1)
+            is_last = level == DEPTH - 1 and idx == WIDTH - 1
             comma = "" if is_last else ","
             f.write(f'                    {{path: "{name}.cppm", kind: "named_module"}}{comma}\n')
 
@@ -101,15 +108,9 @@ with open(build_um_path, "w") as f:
     f.write('        cflags: {public: {}, private: {}}\n')
     f.write('    })\n\n')
 
-    f.write('    cppbuild::add_link_target({\n')
-    f.write('        name: "massive",\n')
-    f.write('        kind: "static_library",\n')
-    f.write('        deps: {"massive"}\n')
-    f.write('    })\n\n')
-
     f.write('    return cppbuild::build_config\n')
     f.write('}\n')
 
 print(f"Generated {TOTAL} modules ({DEPTH} levels x {WIDTH} wide)")
-print(f"  {codegen_path}")
-print(f"  {build_um_path}")
+print(f"  {os.path.relpath(codegen_path)}")
+print(f"  {os.path.relpath(build_um_path)}")

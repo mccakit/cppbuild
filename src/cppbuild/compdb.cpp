@@ -418,7 +418,8 @@ export namespace cppbuild
     {
         auto tc = types::toolchain::load(build_dir / "tc.cache");
 
-        // Step 1: find owner, BFS deps transitively, collect allowed sources + src_root.
+        // Step 1: find owner build_target, BFS build_target deps transitively,
+        // collect allowed sources + src_root.
         types::build_target owner {};
         std::unordered_set<std::string> allowed_sources;
         std::filesystem::path src_root;
@@ -520,8 +521,8 @@ export namespace cppbuild
             content = fmt::format("{}\n", fmt::join(all_flags, "\n"));
         }
 
-        // Step 3: build a local logical_name -> source_path map restricted to allowed_sources,
-        // then BFS from src_path resolving via that map.
+        // Step 3: build a local logical_name -> source_path map restricted to reachable
+        // build_target sources, then BFS from src_path resolving via that map.
         if (!is_c)
         {
             try
@@ -533,7 +534,6 @@ export namespace cppbuild
                     return db_get_struct<types::dyndep_entry>(dbi, txn, src.string());
                 };
 
-                // Local name -> source map, scoped to reachable targets only.
                 std::unordered_map<std::string, std::filesystem::path> name_to_src;
                 for (auto const &candidate : allowed_sources)
                 {
