@@ -174,7 +174,39 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
-    auto scan_single_source(const std::filesystem::path &db_path, const types::toolchain &tc) -> void
+    auto create_deps_db(const std::filesystem::path &build_dir) -> void
+    {
+        auto lmdb_path = build_dir / "deps.db";
+        try
+        {
+            // Set up and create the environment file
+            auto env = lmdbxx::env::create();
+            env.set_mapsize(static_cast<std::size_t>(1) << 30);
+            env.open(lmdb_path, lmdbxx::env_flags::no_subdir, 0644);
+
+            // Begin a transaction and open the default database with the create flag
+            // to ensure internal structures are fully initialized.
+            auto txn = lmdbxx::txn::begin(env);
+            auto dbi = lmdbxx::dbi::open(txn, nullptr, lmdbxx::db_flags::create);
+            txn.commit();
+        }
+        catch (const lmdbxx::error &e)
+        {
+            std::println(std::cerr, "Failed to initialize deps database: {} (code: {})", e.what(), e.code());
+            std::exit(1);
+        }
+    }
+
+    auto open_deps_env(const std::filesystem::path &lmdb_path,
+                       lmdbxx::env_flags additional_flags = lmdbxx::env_flags::none) -> lmdbxx::env
+    {
+        auto env = lmdbxx::env::create();
+        env.set_mapsize(static_cast<std::size_t>(1) << 30); // 1GB map size
+        env.open(lmdb_path, lmdbxx::env_flags::no_subdir | additional_flags, 0644);
+        return env;
+    }
+
+    auto scan_single_source(const std::filesystem::path &db_path, const types::toolchain &tc, lmdbxx::env &env) -> void
     {
         auto proc =
             subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", db_path.string()})
@@ -225,16 +257,10 @@ export namespace cppbuild
         }
         auto [data, out] = zpp::bits::data_out();
         out(entry).or_throw();
-        auto lmdb_path = db_path.parent_path() / "deps.db";
 
         try
         {
-            // Set up the environment
-            auto env = lmdbxx::env::create();
-            env.set_mapsize(static_cast<std::size_t>(1) << 30);
-            env.open(lmdb_path, lmdbxx::env_flags::no_subdir, 0644);
-
-            // Begin transaction and open the default database
+            // Begin transaction using the provided environment and open the default database
             auto txn = lmdbxx::txn::begin(env);
             auto dbi = lmdbxx::dbi::open(txn);
 
@@ -256,7 +282,7 @@ export namespace cppbuild
         catch (const lmdbxx::error &)
         {
             // Silently return on error, matching the original code's behavior
-            // RAII will automatically clean up the txn, dbi, and env handles
+            // RAII will automatically clean up the txn and dbi handles
             return;
         }
 
@@ -264,20 +290,16 @@ export namespace cppbuild
         std::ofstream stamp(stamp_path);
     }
 
-    auto generate_single_dyndep(const std::filesystem::path &src_path, const std::filesystem::path &build_dir) -> void
+    auto generate_single_dyndep(const std::filesystem::path &src_path,
+                                const std::filesystem::path &build_dir,
+                                lmdbxx::env &env) -> void
     {
-        auto lmdb_path = build_dir / "deps.db";
         types::dyndep_entry entry {};
         std::vector<std::filesystem::path> direct {};
 
         try
         {
-            // Set up the read-only environment
-            auto env = lmdbxx::env::create();
-            env.set_mapsize(static_cast<std::size_t>(1) << 30);
-            env.open(lmdb_path, lmdbxx::env_flags::no_subdir | lmdbxx::env_flags::rdonly, 0644);
-
-            // Begin a read-only transaction and open the default database
+            // Begin a read-only transaction using the provided environment
             auto txn = lmdbxx::txn::begin(env, nullptr, lmdbxx::env_flags::rdonly);
             auto dbi = lmdbxx::dbi::open(txn);
 
@@ -337,7 +359,9 @@ export namespace cppbuild
         }
     }
 
-    auto generate_single_rsp(const std::filesystem::path &src_path, const std::filesystem::path &build_dir) -> void
+    auto generate_single_rsp(const std::filesystem::path &src_path,
+                             const std::filesystem::path &build_dir,
+                             lmdbxx::env &env) -> void
     {
         auto tc = types::toolchain::load(build_dir / "tc.cache");
         auto build_cache = types::build_cache::load(build_dir / "build.cache");
@@ -409,13 +433,9 @@ export namespace cppbuild
 
         if (!is_c)
         {
-            auto lmdb_path = build_dir / "deps.db";
             try
             {
-                auto env = lmdbxx::env::create();
-                env.set_mapsize(static_cast<std::size_t>(1) << 30);
-                env.open(lmdb_path, lmdbxx::env_flags::no_subdir | lmdbxx::env_flags::rdonly, 0644);
-
+                // Begin read-only transaction using the provided environment
                 auto txn = lmdbxx::txn::begin(env, nullptr, lmdbxx::env_flags::rdonly);
                 auto dbi = lmdbxx::dbi::open(txn);
 

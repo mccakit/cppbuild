@@ -4,6 +4,7 @@ import cppbuild;
 import fmt;
 import bs.thread_pool;
 import cli11;
+import lmdbxx;
 using CLI::App;
 
 auto main(int argc, char **argv) -> int
@@ -82,6 +83,7 @@ auto main(int argc, char **argv) -> int
         cppbuild::types::build_cache cache {.build_targets = build_targets, .link_targets = graph.link_targets};
         cache.save(build_dir / "build.cache");
         tc.save(build_dir / "tc.cache");
+        cppbuild::create_deps_db(build_dir);
     }
     else if (build->parsed())
     {
@@ -99,27 +101,25 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
         auto tc = cppbuild::types::toolchain::load(build_dir / "tc.cache");
-        cppbuild::scan_single_source(db_path, tc);
+        auto lmdb_path = db_path.parent_path() / "deps.db";
+        auto env = cppbuild::open_deps_env(lmdb_path);
+        cppbuild::scan_single_source(db_path, tc, env);
     }
     else if (gen_single_dd->parsed())
     {
-        using ms = std::chrono::duration<double, std::milli>;
-        auto t0 = std::chrono::steady_clock::now();
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
-        cppbuild::generate_single_dyndep(src_path, build_dir);
-        auto t1 = std::chrono::steady_clock::now();
-        fmt::println("Gen single dd           : {:.2f} ms", ms(t1 - t0).count());
+        auto lmdb_path = build_dir / "deps.db";
+        auto env = cppbuild::open_deps_env(lmdb_path, lmdbxx::env_flags::rdonly);
+        cppbuild::generate_single_dyndep(src_path, build_dir, env);
     }
     else if (gen_single_rsp->parsed())
     {
-        using ms = std::chrono::duration<double, std::milli>;
-        auto t0 = std::chrono::steady_clock::now();
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
-        cppbuild::generate_single_rsp(src_path, build_dir);
-        auto t1 = std::chrono::steady_clock::now();
-        fmt::println("Gen single rsp           : {:.2f} ms", ms(t1 - t0).count());
+        auto lmdb_path = build_dir / "deps.db";
+        auto env = cppbuild::open_deps_env(lmdb_path, lmdbxx::env_flags::rdonly);
+        cppbuild::generate_single_rsp(src_path, build_dir, env);
     }
     return 0;
 }

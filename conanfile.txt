@@ -7,5 +7,4 @@ subprocess/main
 glaze/modules
 zppbits/main
 thread_pool/main
-mimalloc/main
 lmdbxx/main
