@@ -1,4 +1,5 @@
 module;
+#include <lmdb.h>
 export module cppbuild:compdb;
 import std;
 import graaf;
@@ -219,269 +220,301 @@ export namespace cppbuild
                 }
             }
         }
-        auto cache_path = db_path.parent_path() / (db_path.stem().stem().string() + ".dyndep.bin");
-        entry.save(cache_path);
-    }
-
-    auto load_dyndep_entries(const std::filesystem::path &build_dir,
-                             const std::vector<types::build_target> &targets,
-                             BS::thread_pool<> &pool) -> std::vector<types::dyndep_entry>
-    {
-        std::vector<std::filesystem::path> paths;
-        for (const auto &bt : targets)
-        {
-            for (const auto &sg : bt.srcs)
-            {
-                for (const auto &src : sg.srcs)
-                {
-                    if (src.extension() == ".c")
-                    {
-                        continue;
-                    }
-                    paths.push_back(build_dir / (src.filename().string() + ".dyndep.bin"));
-                }
-            }
-
-            for (const auto &gg : bt.gen_groups)
-            {
-                for (const auto &go : gg.outputs)
-                {
-                    if (go.path.extension() == ".c")
-                    {
-                        continue;
-                    }
-                    paths.push_back(build_dir / (go.path.filename().string() + ".dyndep.bin"));
-                }
-            }
-        }
-        std::vector<types::dyndep_entry> entries(paths.size());
-        pool.submit_loop(
-                std::size_t {0}, paths.size(), [&](std::size_t i) { entries[i] = types::dyndep_entry::load(paths[i]); })
-            .wait();
-        return entries;
-    }
-
-    auto parse_direct_deps(const std::vector<types::dyndep_entry> &scanned)
-        -> graaf::directed_graph<types::cxx_module, int>
-    {
-        graaf::directed_graph<types::cxx_module, int> graph;
-        std::unordered_map<std::string, graaf::vertex_id_t> name_to_id;
-        std::unordered_map<std::string, graaf::vertex_id_t> path_to_id;
-
-        // add all modules as vertices
-        for (const auto &entry : scanned)
-        {
-            auto id = graph.add_vertex(entry.src);
-            path_to_id[entry.src.source_path.string()] = id;
-            if (!entry.src.logical_name.empty())
-            {
-                name_to_id[entry.src.logical_name] = id;
-            }
-        }
-
-        // add edges for direct deps
-        for (const auto &entry : scanned)
-        {
-            auto src_it = path_to_id.find(entry.src.source_path.string());
-            if (src_it == path_to_id.end())
-            {
-                continue;
-            }
-            for (const auto &dep : entry.deps)
-            {
-                auto dst_it = name_to_id.find(dep.logical_name);
-                if (dst_it != name_to_id.end())
-                {
-                    graph.add_edge(src_it->second, dst_it->second, 1);
-                }
-            }
-        }
-
-        return graph;
-    }
-
-    auto resolve_transitive_deps(const graaf::directed_graph<types::cxx_module, int> &graph)
-        -> std::vector<types::dyndep_entry>
-    {
-        std::vector<types::dyndep_entry> result {};
-        for (auto const &[id, value] : graph.get_vertices())
-        {
-            types::dyndep_entry entry {};
-            entry.src = value;
-            graaf::algorithm::breadth_first_traverse(graph, id, [&](graaf::edge_id_t e) {
-                auto [src, dst] = e;
-                entry.deps.push_back(graph.get_vertex(dst));
-            });
-            result.push_back(std::move(entry));
-        }
-        return result;
-    }
-
-    auto generate_dyndep(const std::filesystem::path &build_dir,
-                         const std::vector<types::dyndep_entry> &entries,
-                         BS::thread_pool<> &pool) -> void
-    {
-        if (entries.empty())
+        if (entry.src.source_path.empty())
         {
             return;
         }
-        std::string build_dir_str = build_dir.string();
-        std::vector<std::string> results(entries.size());
-        pool.detach_blocks(std::size_t {0}, entries.size(), [&](std::size_t begin, std::size_t end) {
-            fmt::memory_buffer line_buf;
-            for (std::size_t i = begin; i < end; ++i)
-            {
-                line_buf.clear();
-                const auto &entry = entries[i];
-                std::string_view ext = entry.src.logical_name.empty() ? ".o" : ".pcm";
-                fmt::format_to(std::back_inserter(line_buf),
-                               "build {}/{}{}: dyndep",
-                               build_dir_str,
-                               entry.src.source_path.filename().string(),
-                               ext);
-                if (!entry.deps.empty())
-                {
-                    line_buf.push_back(' ');
-                    line_buf.push_back('|');
-                    for (const auto &dep : entry.deps)
-                    {
-                        fmt::format_to(std::back_inserter(line_buf),
-                                       " {}/{}.pcm",
-                                       build_dir_str,
-                                       dep.source_path.filename().string());
-                    }
-                }
-                line_buf.push_back('\n');
-                results[i] = fmt::to_string(line_buf);
-            }
-        });
-        pool.wait();
-        auto out = fmt::output_file((build_dir / "deps.dd").string());
-        out.print("ninja_dyndep_version = 1\n");
-        for (const auto &line : results)
+        auto [data, out] = zpp::bits::data_out();
+        out(entry).or_throw();
+        auto lmdb_path = db_path.parent_path() / "deps.db";
+        MDB_env *env = nullptr;
+        if (mdb_env_create(&env) != 0)
         {
-            out.print("{}", line);
+            return;
+        }
+        mdb_env_set_mapsize(env, static_cast<std::size_t>(1) << 30);
+        if (mdb_env_open(env, lmdb_path.string().c_str(), MDB_NOSUBDIR, 0644) != 0)
+        {
+            mdb_env_close(env);
+            return;
+        }
+        MDB_txn *txn = nullptr;
+        if (mdb_txn_begin(env, nullptr, 0, &txn) != 0)
+        {
+            mdb_env_close(env);
+            return;
+        }
+        MDB_dbi dbi {};
+        if (mdb_dbi_open(txn, nullptr, 0, &dbi) != 0)
+        {
+            mdb_txn_abort(txn);
+            mdb_env_close(env);
+            return;
+        }
+        auto key_str = entry.src.source_path.string();
+        MDB_val key {key_str.size(), key_str.data()};
+        MDB_val value {data.size(), data.data()};
+        if (mdb_put(txn, dbi, &key, &value, 0) != 0)
+        {
+            mdb_txn_abort(txn);
+            mdb_env_close(env);
+            return;
+        }
+        if (!entry.src.logical_name.empty())
+        {
+            auto name_key_str = "n:" + entry.src.logical_name;
+            auto name_val_str = entry.src.source_path.string();
+            MDB_val name_key {name_key_str.size(), name_key_str.data()};
+            MDB_val name_val {name_val_str.size(), name_val_str.data()};
+            if (mdb_put(txn, dbi, &name_key, &name_val, 0) != 0)
+            {
+                mdb_txn_abort(txn);
+                mdb_env_close(env);
+                return;
+            }
+        }
+        mdb_txn_commit(txn);
+        mdb_env_close(env);
+        auto stamp_path = db_path.parent_path() / (db_path.stem().stem().string() + ".scan.stamp");
+        std::ofstream stamp(stamp_path);
+    }
+
+    auto generate_single_dyndep(const std::filesystem::path &src_path, const std::filesystem::path &build_dir) -> void
+    {
+        auto lmdb_path = build_dir / "deps.db";
+        MDB_env *env = nullptr;
+        if (mdb_env_create(&env) != 0)
+        {
+            return;
+        }
+        mdb_env_set_mapsize(env, static_cast<std::size_t>(1) << 30);
+        if (mdb_env_open(env, lmdb_path.string().c_str(), MDB_NOSUBDIR | MDB_RDONLY, 0644) != 0)
+        {
+            mdb_env_close(env);
+            return;
+        }
+        MDB_txn *txn = nullptr;
+        if (mdb_txn_begin(env, nullptr, MDB_RDONLY, &txn) != 0)
+        {
+            mdb_env_close(env);
+            return;
+        }
+        MDB_dbi dbi {};
+        if (mdb_dbi_open(txn, nullptr, 0, &dbi) != 0)
+        {
+            mdb_txn_abort(txn);
+            mdb_env_close(env);
+            return;
+        }
+        auto self_key_str = src_path.string();
+        MDB_val self_key {self_key_str.size(), self_key_str.data()};
+        MDB_val self_val {};
+        if (mdb_get(txn, dbi, &self_key, &self_val) != 0)
+        {
+            mdb_txn_abort(txn);
+            mdb_env_close(env);
+            return;
+        }
+        std::span<const std::byte> self_bytes {static_cast<const std::byte *>(self_val.mv_data), self_val.mv_size};
+        auto entry = types::dyndep_entry::load_from_buffer(self_bytes);
+        std::vector<std::filesystem::path> direct {};
+        for (auto const &dep : entry.deps)
+        {
+            auto name_key_str = "n:" + dep.logical_name;
+            MDB_val name_key {name_key_str.size(), name_key_str.data()};
+            MDB_val name_val {};
+            if (mdb_get(txn, dbi, &name_key, &name_val) != 0)
+            {
+                continue;
+            }
+            direct.emplace_back(std::string_view(static_cast<const char *>(name_val.mv_data), name_val.mv_size));
+        }
+        mdb_txn_abort(txn);
+        mdb_env_close(env);
+        auto dd_path = build_dir / (entry.src.source_path.filename().string() + ".dd");
+        std::ofstream dd(dd_path);
+        dd << "ninja_dyndep_version = 1\n";
+        std::string dep_pcms;
+        for (auto const &dep_src : direct)
+        {
+            auto dep_pcm = build_dir / (dep_src.filename().string() + ".pcm");
+            dep_pcms += " " + dep_pcm.string();
+        }
+        if (!entry.src.logical_name.empty())
+        {
+            auto pcm = build_dir / (entry.src.source_path.filename().string() + ".pcm");
+            dd << "build " << pcm.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
+        }
+        else
+        {
+            auto obj = build_dir / (entry.src.source_path.filename().string() + ".o");
+            dd << "build " << obj.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
         }
     }
 
-    auto generate_rsp(const std::filesystem::path &build_dir,
-                      const types::toolchain &tc,
-                      const std::vector<types::build_target> &targets,
-                      const std::vector<types::dyndep_entry> &entries,
-                      BS::thread_pool<> &pool) -> void
+    auto generate_single_rsp(const std::filesystem::path &src_path, const std::filesystem::path &build_dir) -> void
     {
-        std::string tc_cflags_str = fmt::to_string(fmt::join(tc.cflags, "\n"));
-        std::string tc_cxxflags_str = fmt::to_string(fmt::join(tc.cxxflags, "\n"));
+        auto tc = types::toolchain::load(build_dir / "tc.cache");
+        auto build_cache = types::build_cache::load(build_dir / "build.cache");
 
-        struct target_flags
+        const types::build_target *owner = nullptr;
+        for (auto const &bt : build_cache.build_targets)
         {
-            public:
-                std::string c_flags;
-                std::string cxx_flags;
-        };
-        std::unordered_map<const types::build_target *, target_flags> precomputed_flags;
-        precomputed_flags.reserve(targets.size());
-
-        for (auto const &bt : targets)
-        {
-            precomputed_flags[&bt] = {fmt::format("{}\n{}\n{}\n",
-                                                  tc_cflags_str,
-                                                  fmt::join(bt.cflags.public_, "\n"),
-                                                  fmt::join(bt.cflags.private_, "\n")),
-                                      fmt::format("{}\n{}\n{}\n",
-                                                  tc_cxxflags_str,
-                                                  fmt::join(bt.cxxflags.public_, "\n"),
-                                                  fmt::join(bt.cxxflags.private_, "\n"))};
-        }
-
-        std::unordered_map<std::string, types::dyndep_entry const *> src_to_entry;
-        src_to_entry.reserve(entries.size());
-        for (auto const &entry : entries)
-        {
-            src_to_entry[entry.src.source_path.string()] = &entry;
-        }
-
-        struct rsp_task
-        {
-                const std::filesystem::path *src;
-                const std::string *flags_to_write;
-                const types::dyndep_entry *dyndep;
-        };
-
-        std::vector<rsp_task> tasks;
-
-        for (auto const &bt : targets)
-        {
-            auto const &flags = precomputed_flags.at(&bt);
-
-            auto process_source = [&](const std::filesystem::path &src_path) {
-                auto it = src_to_entry.find(src_path.string());
-                bool is_c = src_path.extension() == ".c";
-                tasks.push_back({&src_path,
-                                 is_c ? &flags.c_flags : &flags.cxx_flags,
-                                 it != src_to_entry.end() ? it->second : nullptr});
-            };
-
             for (auto const &sg : bt.srcs)
             {
                 for (auto const &src : sg.srcs)
                 {
-                    process_source(src);
+                    if (src == src_path)
+                    {
+                        owner = &bt;
+                        break;
+                    }
                 }
+                if (owner)
+                {
+                    break;
+                }
+            }
+            if (owner)
+            {
+                break;
             }
             for (auto const &gg : bt.gen_groups)
             {
                 for (auto const &go : gg.outputs)
                 {
-                    process_source(go.path);
+                    if (go.path == src_path)
+                    {
+                        owner = &bt;
+                        break;
+                    }
                 }
+                if (owner)
+                {
+                    break;
+                }
+            }
+            if (owner)
+            {
+                break;
             }
         }
 
-        std::string build_dir_str = build_dir.string();
+        if (!owner)
+        {
+            return;
+        }
 
-        pool.detach_blocks(std::size_t {0}, tasks.size(), [&](std::size_t begin, std::size_t end) {
-            for (std::size_t i = begin; i < end; ++i)
+        bool is_c = src_path.extension() == ".c";
+        std::string content;
+        if (is_c)
+        {
+            content = fmt::format("{}\n{}\n{}\n",
+                                  fmt::join(tc.cflags, "\n"),
+                                  fmt::join(owner->cflags.public_, "\n"),
+                                  fmt::join(owner->cflags.private_, "\n"));
+        }
+        else
+        {
+            content = fmt::format("{}\n{}\n{}\n",
+                                  fmt::join(tc.cxxflags, "\n"),
+                                  fmt::join(owner->cxxflags.public_, "\n"),
+                                  fmt::join(owner->cxxflags.private_, "\n"));
+        }
+
+        if (!is_c)
+        {
+            auto lmdb_path = build_dir / "deps.db";
+            MDB_env *env = nullptr;
+            if (mdb_env_create(&env) == 0)
             {
-                auto const &task = tasks[i];
-
-                std::string content = *task.flags_to_write;
-                if (task.dyndep)
+                mdb_env_set_mapsize(env, static_cast<std::size_t>(1) << 30);
+                if (mdb_env_open(env, lmdb_path.string().c_str(), MDB_NOSUBDIR | MDB_RDONLY, 0644) == 0)
                 {
-                    for (auto const &dep : task.dyndep->deps)
+                    MDB_txn *txn = nullptr;
+                    if (mdb_txn_begin(env, nullptr, MDB_RDONLY, &txn) == 0)
                     {
-                        fmt::format_to(std::back_inserter(content),
-                                       "-fmodule-file={}={}/{}.pcm\n",
-                                       dep.logical_name,
-                                       build_dir_str,
-                                       dep.source_path.filename().string());
-                    }
-                }
-
-                std::string rsp_path = fmt::format("{}/{}.rsp", build_dir_str, task.src->filename().string());
-
-                // Skip write if content unchanged
-                std::ifstream existing(rsp_path, std::ios::binary | std::ios::ate);
-                if (existing)
-                {
-                    auto size = existing.tellg();
-                    if (static_cast<std::size_t>(size) == content.size())
-                    {
-                        std::string old(static_cast<std::size_t>(size), '\0');
-                        existing.seekg(0);
-                        existing.read(old.data(), size);
-                        if (old == content)
+                        MDB_dbi dbi {};
+                        if (mdb_dbi_open(txn, nullptr, 0, &dbi) == 0)
                         {
-                            continue;
+                            auto load_entry =
+                                [&](const std::filesystem::path &src) -> std::optional<types::dyndep_entry> {
+                                auto key_str = src.string();
+                                MDB_val key {key_str.size(), key_str.data()};
+                                MDB_val value {};
+                                if (mdb_get(txn, dbi, &key, &value) != 0)
+                                {
+                                    return std::nullopt;
+                                }
+                                std::span<const std::byte> bytes {static_cast<const std::byte *>(value.mv_data),
+                                                                  value.mv_size};
+                                return types::dyndep_entry::load_from_buffer(bytes);
+                            };
+
+                            auto lookup_name = [&](const std::string &name) -> std::filesystem::path {
+                                auto key_str = "n:" + name;
+                                MDB_val key {key_str.size(), key_str.data()};
+                                MDB_val value {};
+                                if (mdb_get(txn, dbi, &key, &value) != 0)
+                                {
+                                    return {};
+                                }
+                                return std::filesystem::path(
+                                    std::string_view(static_cast<const char *>(value.mv_data), value.mv_size));
+                            };
+
+                            std::unordered_set<std::string> visited {};
+                            std::queue<std::string> frontier {};
+
+                            if (auto self_entry = load_entry(src_path); self_entry)
+                            {
+                                for (auto const &dep : self_entry->deps)
+                                {
+                                    if (visited.insert(dep.logical_name).second)
+                                    {
+                                        frontier.push(dep.logical_name);
+                                    }
+                                }
+                            }
+
+                            while (!frontier.empty())
+                            {
+                                auto name = std::move(frontier.front());
+                                frontier.pop();
+
+                                auto dep_src = lookup_name(name);
+                                if (dep_src.empty())
+                                {
+                                    continue;
+                                }
+
+                                fmt::format_to(std::back_inserter(content),
+                                               "-fmodule-file={}={}/{}.pcm\n",
+                                               name,
+                                               build_dir.string(),
+                                               dep_src.filename().string());
+
+                                if (auto dep_entry = load_entry(dep_src); dep_entry)
+                                {
+                                    for (auto const &next : dep_entry->deps)
+                                    {
+                                        if (visited.insert(next.logical_name).second)
+                                        {
+                                            frontier.push(next.logical_name);
+                                        }
+                                    }
+                                }
+                            }
                         }
+                        mdb_txn_abort(txn);
                     }
                 }
-
-                auto out = fmt::output_file(rsp_path);
-                out.print("{}", content);
+                mdb_env_close(env);
             }
-        });
+        }
 
-        pool.wait();
+        auto rsp_path = build_dir / (src_path.filename().string() + ".rsp");
+        auto out = fmt::output_file(rsp_path.string());
+        out.print("{}", content);
     }
 } // namespace cppbuild

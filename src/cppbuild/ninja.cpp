@@ -18,6 +18,37 @@ export namespace cppbuild
         return result;
     }
 
+    auto get_all_cxx_sources(const types::build_graph &bg) -> std::vector<std::filesystem::path>
+    {
+        std::vector<std::filesystem::path> srcs;
+        for (auto const &[id, bt] : bg.graph.get_vertices())
+        {
+            for (auto const &sg : bt.srcs)
+            {
+                for (auto const &src : sg.srcs)
+                {
+                    if (src.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    srcs.push_back(src);
+                }
+            }
+            for (auto const &gg : bt.gen_groups)
+            {
+                for (auto const &go : gg.outputs)
+                {
+                    if (go.path.extension() == ".c")
+                    {
+                        continue;
+                    }
+                    srcs.push_back(go.path);
+                }
+            }
+        }
+        return srcs;
+    }
+
     auto rules(fmt::ostream &file,
                const types::toolchain &toolchain,
                const std::filesystem::path &self_path,
@@ -62,6 +93,14 @@ export namespace cppbuild
         file.print("rule scan_single\n");
         file.print("  command = {} scan_single --build-dir={} $in\n", self_path.string(), build_dir.string());
         file.print("  description = SCAN $in\n\n");
+
+        file.print("rule gen_single_dd\n");
+        file.print("  command = {} gen_single_dd --build-dir={} $in\n", self_path.string(), build_dir.string());
+        file.print("  description = DD $in\n\n");
+
+        file.print("rule gen_single_rsp\n");
+        file.print("  command = {} gen_single_rsp --build-dir={} $in\n", self_path.string(), build_dir.string());
+        file.print("  description = RSP $in\n\n");
     }
 
     auto generate_edges(fmt::ostream &file, const types::build_graph &bg) -> void
@@ -87,42 +126,57 @@ export namespace cppbuild
         }
     }
 
-    auto scan_edges(fmt::ostream &file, const std::filesystem::path &build_dir, const types::build_graph &bg)
-        -> std::vector<std::string>
+    auto scan_edges(fmt::ostream &file,
+                    const std::filesystem::path &build_dir,
+                    const std::vector<std::filesystem::path> &srcs) -> void
     {
-        auto outputs = std::vector<std::string> {};
-        for (auto const &[id, bt] : bg.graph.get_vertices())
+        for (auto const &src : srcs)
         {
-            for (auto const &sg : bt.srcs)
-            {
-                for (auto const &src : sg.srcs)
-                {
-                    if (src.extension() == ".c")
-                    {
-                        continue;
-                    }
-                    const auto db = (build_dir / (src.filename().string() + ".p1689.json")).string();
-                    const auto out = (build_dir / (src.filename().string() + ".dyndep.bin")).string();
-                    file.print("build {}: scan_single {} | {}\n\n", out, db, src.string());
-                    outputs.push_back(out);
-                }
-            }
-            for (auto const &gg : bt.gen_groups)
-            {
-                for (auto const &go : gg.outputs)
-                {
-                    if (go.path.extension() == ".c")
-                    {
-                        continue;
-                    }
-                    const auto db = (build_dir / (go.path.filename().string() + ".p1689.json")).string();
-                    const auto out = (build_dir / (go.path.filename().string() + ".dyndep.bin")).string();
-                    file.print("build {}: scan_single {} | {}\n\n", out, db, go.path.string());
-                    outputs.push_back(out);
-                }
-            }
+            const auto db = (build_dir / (src.filename().string() + ".p1689.json")).string();
+            const auto out = (build_dir / (src.filename().string() + ".scan.stamp")).string();
+            file.print("build {}: scan_single {} | {}\n\n", out, db, src.string());
         }
-        return outputs;
+    }
+
+    auto scan_phase(fmt::ostream &file,
+                    const std::filesystem::path &build_dir,
+                    const std::vector<std::filesystem::path> &srcs) -> void
+    {
+        if (srcs.empty())
+        {
+            return;
+        }
+        std::vector<std::string> stamps;
+        stamps.reserve(srcs.size());
+        for (auto const &src : srcs)
+        {
+            stamps.push_back((build_dir / (src.filename().string() + ".scan.stamp")).string());
+        }
+        file.print("build scan_phase: phony {}\n\n", fmt::join(stamps, " "));
+    }
+
+    auto dd_edges(fmt::ostream &file,
+                  const std::filesystem::path &build_dir,
+                  const std::vector<std::filesystem::path> &srcs) -> void
+    {
+        for (auto const &src : srcs)
+        {
+            const auto dd = (build_dir / (src.filename().string() + ".dd")).string();
+            const auto stamp = (build_dir / (src.filename().string() + ".scan.stamp")).string();
+            file.print("build {}: gen_single_dd {} | {} || scan_phase\n\n", dd, src.string(), stamp);
+        }
+    }
+
+    auto rsp_edges(fmt::ostream &file,
+                   const std::filesystem::path &build_dir,
+                   const std::vector<std::filesystem::path> &srcs) -> void
+    {
+        for (auto const &src : srcs)
+        {
+            const auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
+            const auto stamp = (build_dir / (src.filename().string() + ".scan.stamp")).string();
+            file.print("build {}: gen_single_rsp {} | {} || scan_phase\n\n", rsp, src.string(), stamp);
+        }
     }
 
     auto dyndep_edge(fmt::ostream &file,
@@ -198,17 +252,15 @@ export namespace cppbuild
                                        const std::filesystem::path &build_dir,
                                        const types::toolchain &toolchain) -> void
     {
-        const auto dyndep = (build_dir / "deps.dd").string();
         for (auto id : bg.topo_order)
         {
             const auto &target = bg.graph.get_vertex(id);
-            const auto order_only = " || " + dyndep;
-
             auto write_edge = [&](const std::filesystem::path &src) {
                 const auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
                 const auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
-                file.print("build {}: precompile_named_module {}{}\n", pcm, src.string(), order_only);
-                file.print("  dyndep = {}\n", dyndep);
+                const auto dd = (build_dir / (src.filename().string() + ".dd")).string();
+                file.print("build {}: precompile_named_module {} | {} || {}\n", pcm, src.string(), rsp, dd);
+                file.print("  dyndep = {}\n", dd);
                 file.print("  rsp = {}\n", rsp);
                 file.print("  cxxflags = {} {} {}\n",
                            fmt::join(toolchain.cxxflags, " "),
@@ -216,7 +268,6 @@ export namespace cppbuild
                            fmt::join(target.cxxflags.private_, " "));
                 file.print("\n");
             };
-
             for (auto const &sg : target.srcs)
             {
                 if (sg.kind == "named_module")
@@ -227,7 +278,6 @@ export namespace cppbuild
                     }
                 }
             }
-
             for (auto const &gg : target.gen_groups)
             {
                 for (auto const &go : gg.outputs)
@@ -246,24 +296,20 @@ export namespace cppbuild
                        const types::toolchain &toolchain,
                        const std::filesystem::path &build_dir) -> void
     {
-        const auto dyndep = (build_dir / "deps.dd").string();
         for (auto id : bg.topo_order)
         {
             const auto &target = bg.graph.get_vertex(id);
-            const auto order_only = " || " + dyndep;
-
             auto write_named_module = [&](const std::filesystem::path &src) {
                 auto pcm = (build_dir / (src.filename().string() + ".pcm")).string();
                 auto obj = (build_dir / (src.filename().string() + ".pcm.o")).string();
                 auto rsp = (build_dir / (src.filename().string() + ".rsp")).string();
-                file.print("build {}: compile_named_module {}\n", obj, pcm);
+                file.print("build {}: compile_named_module {} | {}\n", obj, pcm, rsp);
                 file.print("  rsp = {}\n", rsp);
                 file.print("  cxxflags = {} {} {}\n\n",
                            fmt::join(toolchain.cxxflags, " "),
                            fmt::join(target.cxxflags.public_, " "),
                            fmt::join(target.cxxflags.private_, " "));
             };
-
             auto write_translation_unit = [&](const std::filesystem::path &src) {
                 const bool is_c = src.extension() == ".c";
                 auto obj = (build_dir / (src.filename().string() + ".o")).string();
@@ -278,8 +324,9 @@ export namespace cppbuild
                 }
                 else
                 {
-                    file.print("build {}: compile_cxx_translation_unit {}{}\n", obj, src.string(), order_only);
-                    file.print("  dyndep = {}\n", dyndep);
+                    auto dd = (build_dir / (src.filename().string() + ".dd")).string();
+                    file.print("build {}: compile_cxx_translation_unit {} | {} || {}\n", obj, src.string(), rsp, dd);
+                    file.print("  dyndep = {}\n", dd);
                     file.print("  rsp = {}\n", rsp);
                     file.print("  cxxflags = {} {} {}\n",
                                fmt::join(toolchain.cxxflags, " "),
@@ -288,7 +335,6 @@ export namespace cppbuild
                     file.print("\n");
                 }
             };
-
             for (auto const &sg : target.srcs)
             {
                 if (sg.kind == "named_module")
@@ -306,7 +352,6 @@ export namespace cppbuild
                     }
                 }
             }
-
             for (auto const &gg : target.gen_groups)
             {
                 for (auto const &go : gg.outputs)
@@ -501,13 +546,15 @@ export namespace cppbuild
         auto file = fmt::output_file((opts.build_dir / "build.ninja").string());
         rules(file, opts.toolchain, opts.self_path, opts.build_dir, opts.graph);
         generate_edges(file, opts.graph);
-        auto scans = scan_edges(file, opts.build_dir, opts.graph);
-        dyndep_edge(file, opts.build_dir, opts.graph, scans);
+        auto srcs = get_all_cxx_sources(opts.graph);
+        scan_edges(file, opts.build_dir, srcs);
+        scan_phase(file, opts.build_dir, srcs);
+        rsp_edges(file, opts.build_dir, srcs);
+        dd_edges(file, opts.build_dir, srcs);
         precompile_named_module_edges(file, opts.graph, opts.build_dir, opts.toolchain);
         codegen_edges(file, opts.graph, opts.toolchain, opts.build_dir);
         link_edges(file, opts.graph, opts.toolchain, opts.build_dir);
     }
-
     struct write_ninja_install_options
     {
         public:

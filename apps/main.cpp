@@ -9,10 +9,13 @@ using CLI::App;
 auto main(int argc, char **argv) -> int
 {
     App app {"cppbuild — C++ Build System"};
+
     std::string script_path_in {};
     std::string toolchain_path_in {};
     std::string build_dir_in {};
     std::string install_dir_in {};
+    std::string db_file_in {};
+    std::string src_file_in {};
 
     auto configure = app.add_subcommand("configure", "Configure the project");
     configure->add_option("-S,--script-path", script_path_in, "Path to build script");
@@ -26,16 +29,20 @@ auto main(int argc, char **argv) -> int
     auto install = app.add_subcommand("install", "Install build artifacts");
     install->add_option("-B,--build-dir", build_dir_in, "Source build directory");
 
-    auto scan_srcs = app.add_subcommand("scan_srcs", "Scan for source changes/dependencies");
-    scan_srcs->add_option("-B,--build-dir", build_dir_in, "Build directory");
-
     auto gen_p1689 = app.add_subcommand("gen_p1689", "Generate P1689 database");
     gen_p1689->add_option("-B,--build-dir", build_dir_in, "Build directory");
 
     auto scan_single = app.add_subcommand("scan_single", "Scan a single source for module dependencies");
-    std::string db_file_in {};
     scan_single->add_option("db_file", db_file_in, "P1689 database file")->required();
     scan_single->add_option("-B,--build-dir", build_dir_in, "Build directory");
+
+    auto gen_single_dd = app.add_subcommand("gen_single_dd", "Generate dyndep file for a single source");
+    gen_single_dd->add_option("src_file", src_file_in, "Source file path")->required();
+    gen_single_dd->add_option("-B,--build-dir", build_dir_in, "Build directory");
+
+    auto gen_single_rsp = app.add_subcommand("gen_single_rsp", "Generate rsp file for a single source");
+    gen_single_rsp->add_option("src_file", src_file_in, "Source file path")->required();
+    gen_single_rsp->add_option("-B,--build-dir", build_dir_in, "Build directory");
     try
     {
         app.parse(argc, argv);
@@ -87,24 +94,32 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path install_dir {std::filesystem::weakly_canonical(install_dir_in)};
         fmt::println("Installing from {} to {}", build_dir.string(), install_dir.string());
     }
-    else if (scan_srcs->parsed())
-    {
-        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
-        BS::thread_pool<> pool;
-        auto build_cache = cppbuild::types::build_cache::load(build_dir / "build.cache");
-        auto tc_cache = cppbuild::types::toolchain::load(build_dir / "tc.cache");
-        auto scanner_output = cppbuild::load_dyndep_entries(build_dir, build_cache.build_targets, pool);
-        auto graph = cppbuild::parse_direct_deps(scanner_output);
-        auto entries = cppbuild::resolve_transitive_deps(graph);
-        cppbuild::generate_rsp(build_dir, tc_cache, build_cache.build_targets, entries, pool);
-        cppbuild::generate_dyndep(build_dir.string(), entries, pool);
-    }
     else if (scan_single->parsed())
     {
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
         auto tc = cppbuild::types::toolchain::load(build_dir / "tc.cache");
         cppbuild::scan_single_source(db_path, tc);
+    }
+    else if (gen_single_dd->parsed())
+    {
+        using ms = std::chrono::duration<double, std::milli>;
+        auto t0 = std::chrono::steady_clock::now();
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        std::filesystem::path src_path {std::filesystem::weakly_canonical(src_file_in)};
+        cppbuild::generate_single_dyndep(src_path, build_dir);
+        auto t1 = std::chrono::steady_clock::now();
+        fmt::println("Gen single dd           : {:.2f} ms", ms(t1 - t0).count());
+    }
+    else if (gen_single_rsp->parsed())
+    {
+        using ms = std::chrono::duration<double, std::milli>;
+        auto t0 = std::chrono::steady_clock::now();
+        std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
+        std::filesystem::path src_path {std::filesystem::weakly_canonical(rsp_src_in)};
+        cppbuild::generate_single_rsp(src_path, build_dir);
+        auto t1 = std::chrono::steady_clock::now();
+        fmt::println("Gen single rsp           : {:.2f} ms", ms(t1 - t0).count());
     }
     return 0;
 }

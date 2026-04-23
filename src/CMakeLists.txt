@@ -24,4 +24,5 @@ target_link_libraries(
         PkgConfig::GLAZE
         PkgConfig::ZPPBITS
         PkgConfig::THREAD_POOL
+        lmdb
 )
