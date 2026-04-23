@@ -1,6 +1,6 @@
 module;
 
-export module b_new;
+export module b.v1;
 
 import d;
 

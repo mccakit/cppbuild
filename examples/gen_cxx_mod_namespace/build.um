@@ -1,0 +1,59 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+
+fn configure*(): cppbuild::results {
+    
+    // TARGET A
+    gen_a_dir := cppbuild::build_dir + "/gen/target_a"
+    cppbuild::add_build_target({
+        name: "target_a",
+        srcs: {},
+        gen_groups: {
+            {
+                command: {
+                    "python3",
+                    cppbuild::script_dir + "/codegen_a.py",
+                    gen_a_dir + "/foo.cppm",
+                    gen_a_dir + "/bar.cppm"
+                },
+                inputs: {},
+                outputs: {
+                    {path: gen_a_dir + "/foo.cppm", kind: "named_module"},
+                    {path: gen_a_dir + "/bar.cppm", kind: "named_module"}
+                }
+            }
+        },
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+
+    // TARGET B
+    gen_b_dir := cppbuild::build_dir + "/gen/target_b"
+    cppbuild::add_build_target({
+        name: "target_b",
+        srcs: {},
+        gen_groups: {
+            {
+                command: {
+                    "python3",
+                    cppbuild::script_dir + "/codegen_b.py",
+                    gen_b_dir + "/foo.cppm",
+                    gen_b_dir + "/bar.cppm"
+                },
+                inputs: {},
+                outputs: {
+                    {path: gen_b_dir + "/foo.cppm", kind: "named_module"},
+                    {path: gen_b_dir + "/bar.cppm", kind: "named_module"}
+                }
+            }
+        },
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+
+    return cppbuild::build_config
+}

@@ -1,0 +1,61 @@
+# cxx_mod_namespace example
+# Two targets, each with greeter + util modules providing the same module names.
+# Demonstrates the n: index collision and allowed_sources filtering.
+
+direction: right
+
+target_a_lib: {
+  shape: package
+  label: "target_a_lib\n(named_module)"
+
+  a_util: "target_a/util.cppm\n[module util]"
+  a_greeter: "target_a/greeter.cppm\n[module greeter]"
+  a_greeter -> a_util: "import util"
+}
+
+target_a_exe: {
+  shape: package
+  label: "target_a_exe\n(cpp)"
+
+  a_main: "target_a/main.cpp"
+}
+
+target_b_lib: {
+  shape: package
+  label: "target_b_lib\n(named_module)"
+
+  b_util: "target_b/util.cppm\n[module util]"
+  b_greeter: "target_b/greeter.cppm\n[module greeter]"
+  b_greeter -> b_util: "import util"
+}
+
+target_b_exe: {
+  shape: package
+  label: "target_b_exe\n(cpp)"
+
+  b_main: "target_b/main.cpp"
+}
+
+target_a_link: {
+  shape: hexagon
+  label: "target_a_link\n(executable)"
+}
+
+target_b_link: {
+  shape: hexagon
+  label: "target_b_link\n(executable)"
+}
+
+# main.cpp imports greeter
+target_a_exe.a_main -> target_a_lib.a_greeter: "import greeter"
+target_b_exe.b_main -> target_b_lib.b_greeter: "import greeter"
+
+# build-target deps
+target_a_exe -> target_a_lib: "deps"
+target_b_exe -> target_b_lib: "deps"
+
+# link-target deps
+target_a_link -> target_a_exe: "deps"
+target_a_link -> target_a_lib: "deps"
+target_b_link -> target_b_exe: "deps"
+target_b_link -> target_b_lib: "deps"

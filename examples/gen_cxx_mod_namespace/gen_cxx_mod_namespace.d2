@@ -1,0 +1,104 @@
+direction: right
+
+classes: {
+  script: {
+    shape: cylinder
+    style.fill: "#ffe0b2"
+  }
+  module: {
+    shape: callout
+    style.fill: "#c8e6c9"
+  }
+  pcm: {
+    shape: parallelogram
+    style.fill: "#bbdefb"
+  }
+}
+
+codegen_a.py: {
+  class: script
+}
+
+codegen_b.py: {
+  class: script
+}
+
+"Target A": {
+  style: {
+    fill: transparent
+    stroke: "#1976d2"
+    stroke-width: 2
+    border-radius: 5
+  }
+
+  foo_src: {
+    class: module
+    label: "gen/target_a/foo.cppm\nmodule foo"
+  }
+
+  bar_src: {
+    class: module
+    label: "gen/target_a/bar.cppm\nmodule bar\n(imports foo)"
+  }
+
+  foo_pcm: {
+    class: pcm
+    label: "gen/target_a/foo.cppm.pcm"
+  }
+
+  bar_pcm: {
+    class: pcm
+    label: "gen/target_a/bar.cppm.pcm"
+  }
+
+  foo_src -> foo_pcm: "compiles to"
+  bar_src -> bar_pcm: "compiles to"
+
+  foo_pcm -> bar_pcm: "dyndep resolves\nimport foo" {
+    style.stroke: "#1976d2"
+    style.stroke-width: 2
+  }
+}
+
+"Target B": {
+  style: {
+    fill: transparent
+    stroke: "#d32f2f"
+    stroke-width: 2
+    border-radius: 5
+  }
+
+  foo_src: {
+    class: module
+    label: "gen/target_b/foo.cppm\nmodule foo"
+  }
+
+  bar_src: {
+    class: module
+    label: "gen/target_b/bar.cppm\nmodule bar\n(imports foo)"
+  }
+
+  foo_pcm: {
+    class: pcm
+    label: "gen/target_b/foo.cppm.pcm"
+  }
+
+  bar_pcm: {
+    class: pcm
+    label: "gen/target_b/bar.cppm.pcm"
+  }
+
+  foo_src -> foo_pcm: "compiles to"
+  bar_src -> bar_pcm: "compiles to"
+
+  foo_pcm -> bar_pcm: "dyndep resolves\nimport foo" {
+    style.stroke: "#d32f2f"
+    style.stroke-width: 2
+  }
+}
+
+codegen_a.py -> "Target A".foo_src: "generates"
+codegen_a.py -> "Target A".bar_src: "generates"
+
+codegen_b.py -> "Target B".foo_src: "generates"
+codegen_b.py -> "Target B".bar_src: "generates"

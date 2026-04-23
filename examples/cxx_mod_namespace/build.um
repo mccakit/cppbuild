@@ -1,0 +1,80 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "target_a_lib",
+        srcs: {
+            {
+                kind: "named_module",
+                srcs: {
+                    "target_a/greeter.cppm",
+                    "target_a/util.cppm"
+                }
+            },
+            {
+                kind: "translation_unit",
+                srcs: {
+                    "target_a/main.cpp"
+                }
+            }
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {
+            public: {},
+            private: {}
+        },
+        cflags: {
+            public: {},
+            private: {}
+        }
+    })
+
+    cppbuild::add_build_target({
+        name: "target_b_lib",
+        srcs: {
+            {
+                kind: "named_module",
+                srcs: {
+                    "target_b/greeter.cppm",
+                    "target_b/util.cppm"
+                }
+            },
+            {
+                kind: "translation_unit",
+                srcs: {
+                    "target_b/main.cpp"
+                }
+            }
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {
+            public: {},
+            private: {}
+        },
+        cflags: {
+            public: {},
+            private: {}
+        }
+    })
+
+    cppbuild::add_link_target({
+        name: "target_a_link",
+        kind: "executable",
+        deps: {"target_a_lib"},
+        ldflags: {}
+    })
+
+    cppbuild::add_link_target({
+        name: "target_b_link",
+        kind: "executable",
+        deps: {"target_b_lib"},
+        ldflags: {}
+    })
+
+    return cppbuild::build_config
+}
