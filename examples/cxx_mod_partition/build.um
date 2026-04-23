@@ -1,0 +1,27 @@
+import (
+    "std.um"
+    "cppbuild.um"
+)
+
+fn configure*(): cppbuild::results {
+    cppbuild::add_build_target({
+        name: "target",
+        srcs: {
+            {kind: "named_module", srcs: {"math.cppm", "math_ops.cppm"}},
+            {kind: "translation_unit", srcs: {"main.cpp"}}
+        },
+        gen_groups: {},
+        deps: {},
+        cxxflags: {public: {}, private: {}},
+        cflags: {public: {}, private: {}}
+    })
+
+    cppbuild::add_link_target({
+        name: "target",
+        kind: "executable",
+        deps: {"target"},
+        ldflags: {}
+    })
+
+    return cppbuild::build_config
+}

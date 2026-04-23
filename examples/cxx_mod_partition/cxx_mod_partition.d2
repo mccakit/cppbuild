@@ -1,0 +1,34 @@
+direction: down
+
+classes: {
+  module: {
+    shape: rectangle
+    style.fill: "#c8e6c9"
+  }
+  partition: {
+    shape: rectangle
+    style.fill: "#bbdefb"
+  }
+  tu: {
+    shape: rectangle
+    style.fill: "#ffe0b2"
+  }
+}
+
+main: main.cpp {
+  class: tu
+  label: "main.cpp\n(import math)"
+}
+
+math: math.cppm {
+  class: module
+  label: "module math\n(export import :ops)"
+}
+
+ops: math_ops.cppm {
+  class: partition
+  label: "module math:ops"
+}
+
+main -> math
+math -> ops
