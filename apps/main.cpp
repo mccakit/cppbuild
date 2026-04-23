@@ -70,26 +70,28 @@ auto main(int argc, char **argv) -> int
         graph.order();
         cppbuild::write_ninja_build({.graph = graph,
                                      .toolchain = tc,
+                                     .src_root = script_path.parent_path(),
                                      .build_dir = build_dir.string(),
                                      .self_path = std::filesystem::weakly_canonical(argv[0])});
-        cppbuild::write_ninja_install({.graph = graph, .build_dir = build_dir, .prefix = install_dir});
+        cppbuild::write_ninja_install({.graph = graph, .src_root = script_path.parent_path(), .build_dir = build_dir, .prefix = install_dir});
         std::vector<cppbuild::types::build_target> build_targets;
         build_targets.reserve(graph.graph.vertex_count());
         for (const auto &[id, bt] : graph.graph.get_vertices())
         {
             build_targets.push_back(bt);
         }
-        cppbuild::generate_compdb_per_source(build_dir, tc, build_targets);
+        cppbuild::generate_compdb_per_source(script_path.parent_path(), build_dir, tc, build_targets);
         cppbuild::create_db(build_dir / "config.db");
         {
             auto env = cppbuild::load_db(build_dir / "config.db");
             auto txn = lmdbxx::txn::begin(env);
             auto dbi = lmdbxx::dbi::open(txn, nullptr);
 
+            cppbuild::db_put_raw(dbi, txn, "src_root", script_path.parent_path().string());
+
             for (const auto &bt : build_targets)
             {
                 cppbuild::db_put_struct(dbi, txn, "bt:" + bt.name, bt);
-
                 for (const auto &sg : bt.srcs)
                 {
                     for (const auto &src : sg.srcs)
@@ -97,7 +99,6 @@ auto main(int argc, char **argv) -> int
                         cppbuild::db_put_raw(dbi, txn, "src:" + src.string(), bt.name);
                     }
                 }
-
                 for (const auto &gg : bt.gen_groups)
                 {
                     for (const auto &go : gg.outputs)
@@ -106,12 +107,10 @@ auto main(int argc, char **argv) -> int
                     }
                 }
             }
-
             for (const auto &lt : graph.link_targets)
             {
                 cppbuild::db_put_struct(dbi, txn, "lt:" + lt.name, lt);
             }
-
             txn.commit();
         }
         tc.save(build_dir / "tc.cache");
@@ -133,9 +132,9 @@ auto main(int argc, char **argv) -> int
         std::filesystem::path build_dir {std::filesystem::weakly_canonical(build_dir_in)};
         std::filesystem::path db_path {std::filesystem::weakly_canonical(db_file_in)};
         auto tc = cppbuild::types::toolchain::load(build_dir / "tc.cache");
-        auto lmdb_path = db_path.parent_path() / "deps.db";
-        auto env = cppbuild::load_db(lmdb_path);
-        cppbuild::scan_single_source(db_path, tc, env);
+        auto deps_env = cppbuild::load_db(build_dir / "deps.db");
+        auto config_env = cppbuild::load_db(build_dir / "config.db", lmdbxx::env_flags::rdonly);
+        cppbuild::scan_single_source(db_path, build_dir, tc, deps_env, config_env);
     }
     else if (gen_single_dd->parsed())
     {

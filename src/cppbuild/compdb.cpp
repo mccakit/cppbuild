@@ -9,78 +9,17 @@ import bs.thread_pool;
 import lmdbxx;
 import :types;
 import :cache;
+import :helpers;
 
 export namespace cppbuild
 {
-    auto generate_single_p1689(const std::filesystem::path &source,
-                               const std::filesystem::path &build_dir,
-                               const types::toolchain &tc,
-                               const std::vector<types::build_target> &targets) -> void
-    {
-        const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
-        const auto dir = build_dir.string();
-
-        std::string kind;
-        std::string flags;
-
-        for (const auto &bt : targets)
-        {
-            const auto bt_flags = fmt::format(
-                "{} {} {} ", cxxflags_str, fmt::join(bt.cxxflags.public_, " "), fmt::join(bt.cxxflags.private_, " "));
-            for (const auto &sg : bt.srcs)
-            {
-                for (const auto &src : sg.srcs)
-                {
-                    if (src == source)
-                    {
-                        kind = sg.kind;
-                        flags = bt_flags;
-                    }
-                }
-            }
-            for (const auto &gg : bt.gen_groups)
-            {
-                for (const auto &go : gg.outputs)
-                {
-                    if (go.path == source)
-                    {
-                        kind = go.kind;
-                        flags = bt_flags;
-                    }
-                }
-            }
-        }
-
-        if (kind.empty())
-        {
-            return;
-        }
-
-        const auto ext = kind == "named_module" ? ".pcm.o" : ".o";
-        const auto src_str = source.string();
-        const auto obj = (build_dir / (source.filename().string() + ext)).string();
-        const auto db_path = (build_dir / (source.filename().string() + ".p1689.json")).string();
-
-        auto out = fmt::output_file(db_path);
-        out.print("[\n"
-                  "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} -c {} -o {}\",\"output\":\"{}\"}}\n"
-                  "]\n",
-                  dir,
-                  src_str,
-                  tc.cxx_compiler,
-                  flags,
-                  src_str,
-                  obj,
-                  obj);
-    }
-
-    auto generate_compdb_per_source(const std::filesystem::path &build_dir,
+    auto generate_compdb_per_source(const std::filesystem::path &src_root,
+                                    const std::filesystem::path &build_dir,
                                     const types::toolchain &tc,
                                     const std::vector<types::build_target> &targets) -> void
     {
         const auto cxxflags_str = fmt::format("{} ", fmt::join(tc.cxxflags, " "));
         const auto dir = build_dir.string();
-
         auto write_db = [&](const std::filesystem::path &src, std::string_view kind, const std::string &flags) {
             if (src.extension() == ".c")
             {
@@ -88,8 +27,10 @@ export namespace cppbuild
             }
             const auto ext = kind == "named_module" ? ".pcm.o" : ".o";
             const auto src_str = src.string();
-            const auto obj = (build_dir / (src.filename().string() + ext)).string();
-            const auto db_path = (build_dir / (src.filename().string() + ".p1689.json")).string();
+            auto mirror = calc_output_path(src, src_root, build_dir);
+            const auto obj = mirror.string() + ext;
+            const auto db_path = mirror.string() + ".p1689.json";
+            std::filesystem::create_directories(std::filesystem::path(db_path).parent_path());
             auto out = fmt::output_file(db_path);
             out.print("[\n"
                       "  {{\"directory\":\"{}\",\"file\":\"{}\",\"command\":\"{} {} -c {} -o {}\",\"output\":\"{}\"}}\n"
@@ -102,7 +43,6 @@ export namespace cppbuild
                       obj,
                       obj);
         };
-
         for (const auto &bt : targets)
         {
             const auto flags = fmt::format(
@@ -175,28 +115,58 @@ export namespace cppbuild
         out.print("[\n{}\n]\n", fmt::join(entries, ",\n"));
     }
 
-    auto scan_single_source(const std::filesystem::path &db_path, const types::toolchain &tc, lmdbxx::env &env) -> void
+    auto scan_single_source(const std::filesystem::path &db_path,
+                            const std::filesystem::path &build_dir,
+                            const types::toolchain &tc,
+                            lmdbxx::env &deps_env,
+                            lmdbxx::env &config_env) -> void
     {
+        // Read src_root from config.db first, since we might need it to reconstruct the source path
+        std::filesystem::path src_root;
+        try
+        {
+            auto txn = lmdbxx::txn::begin(config_env, nullptr, lmdbxx::env_flags::rdonly);
+            auto dbi = lmdbxx::dbi::open(txn);
+            auto sr = db_get_raw(dbi, txn, "src_root");
+            if (!sr)
+            {
+                std::cerr << "FATAL: Could not find 'src_root' in config.db\n";
+                std::exit(1);
+            }
+            src_root = *sr;
+        }
+        catch (const lmdbxx::error &e)
+        {
+            std::cerr << "FATAL: LMDB error reading config_env: " << e.what() << "\n";
+            std::exit(1);
+        }
+
         auto proc =
             subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", db_path.string()})
                 .cout(subprocess::PipeOption::pipe)
                 .run();
         std::string output(proc.cout.begin(), proc.cout.end());
+
         glz::generic doc {};
         if (auto ec = glz::read_json(doc, output); ec)
         {
-            return;
+            std::cerr << "FATAL: Failed to parse p1689 JSON output from scanner for " << db_path.string() << "\n";
+            std::exit(1);
         }
+
         auto &obj = doc.get<glz::generic::object_t>();
         auto rules_it = obj.find("rules");
         if (rules_it == obj.end())
         {
-            return;
+            std::cerr << "FATAL: No 'rules' found in p1689 output for " << db_path.string() << "\n";
+            std::exit(1);
         }
+
         types::dyndep_entry entry {};
         for (auto &rule : rules_it->second.get<glz::generic::array_t>())
         {
             auto &rule_obj = rule.get<glz::generic::object_t>();
+
             if (auto it = rule_obj.find("provides"); it != rule_obj.end())
             {
                 for (auto &provides : it->second.get<glz::generic::array_t>())
@@ -209,6 +179,27 @@ export namespace cppbuild
                     }
                 }
             }
+
+            // If this file does NOT provide a module, deduce the source path from primary-output
+            if (entry.src.source_path.empty())
+            {
+                if (auto po_it = rule_obj.find("primary-output"); po_it != rule_obj.end())
+                {
+                    std::filesystem::path po = po_it->second.get<std::string>();
+                    // po is something like: ".../build/target_a/main.cpp.o"
+                    // Strip the ".o" (or ".pcm.o") to get back to ".../build/target_a/main.cpp"
+                    auto src_in_build = po.replace_extension("");
+                    if (src_in_build.extension() == ".pcm")
+                    {
+                        src_in_build.replace_extension("");
+                    }
+
+                    // Map it from the build directory back to the source root
+                    auto relative_to_build = src_in_build.lexically_relative(build_dir);
+                    entry.src.source_path = (src_root / relative_to_build).string();
+                }
+            }
+
             if (auto it = rule_obj.find("requires"); it != rule_obj.end())
             {
                 for (auto &req : it->second.get<glz::generic::array_t>())
@@ -218,29 +209,43 @@ export namespace cppbuild
                 }
             }
         }
+
         if (entry.src.source_path.empty())
         {
-            return;
+            std::cerr << "FATAL: Could not determine source_path for scan of " << db_path.string() << "\n";
+            std::exit(1);
         }
+
         try
         {
-            auto txn = lmdbxx::txn::begin(env);
+            auto txn = lmdbxx::txn::begin(deps_env);
             auto dbi = lmdbxx::dbi::open(txn);
-            // Primary record
             db_put_struct(dbi, txn, entry.src.source_path.string(), entry);
-            // Logical name index
-            if (!entry.src.logical_name.empty())
-            {
-                db_put_raw(dbi, txn, "n:" + entry.src.logical_name, entry.src.source_path.string());
-            }
             txn.commit();
         }
-        catch (const lmdbxx::error &)
+        catch (const lmdbxx::error &e)
         {
-            return;
+            std::cerr << "FATAL: LMDB error writing to deps_env: " << e.what() << "\n";
+            std::exit(1);
         }
-        auto stamp_path = db_path.parent_path() / (db_path.stem().stem().string() + ".scan.stamp");
+
+        auto stamp_path = calc_output_path(entry.src.source_path, src_root, build_dir);
+        stamp_path += ".scan.stamp";
+
+        std::error_code ec;
+        std::filesystem::create_directories(stamp_path.parent_path(), ec);
+        if (ec)
+        {
+            std::cerr << "FATAL: Failed to create directory for stamp: " << ec.message() << "\n";
+            std::exit(1);
+        }
+
         std::ofstream stamp(stamp_path);
+        if (!stamp)
+        {
+            std::cerr << "FATAL: Failed to write stamp file: " << stamp_path << "\n";
+            std::exit(1);
+        }
     }
 
     auto generate_single_dyndep(const std::filesystem::path &src_path,
@@ -249,24 +254,40 @@ export namespace cppbuild
                                 lmdbxx::env &config_env) -> void
     {
         // Step 1: find owner target from config.db, collect its direct deps + own sources.
-        // For .dd files, we only need direct deps — transitive walking happens in .rsp generation.
         types::build_target owner {};
         std::unordered_set<std::string> allowed_sources;
+        std::filesystem::path src_root;
+
         try
         {
             auto txn = lmdbxx::txn::begin(config_env, nullptr, lmdbxx::env_flags::rdonly);
             auto dbi = lmdbxx::dbi::open(txn);
 
+            auto src_root_str = db_get_raw(dbi, txn, "src_root");
+            if (!src_root_str)
+            {
+                std::cerr << "FATAL: Could not find 'src_root' in config.db\n";
+                std::exit(1);
+            }
+            src_root = *src_root_str;
+
             auto owner_name = db_get_raw(dbi, txn, "src:" + src_path.string());
             if (!owner_name)
             {
-                return;
+                auto rel_path = src_path.lexically_relative(src_root);
+                owner_name = db_get_raw(dbi, txn, "src:" + rel_path.string());
+                if (!owner_name)
+                {
+                    std::cerr << "FATAL: Could not find owner target in config.db for: " << src_path.string() << "\n";
+                    std::exit(1);
+                }
             }
 
             auto owner_opt = db_get_struct<types::build_target>(dbi, txn, "bt:" + *owner_name);
             if (!owner_opt)
             {
-                return;
+                std::cerr << "FATAL: Could not find target struct in config.db for: bt:" << *owner_name << "\n";
+                std::exit(1);
             }
             owner = std::move(*owner_opt);
 
@@ -281,7 +302,6 @@ export namespace cppbuild
 
             collect(owner);
 
-            // Direct deps only — no transitive walk.
             for (auto const &dep_name : owner.deps)
             {
                 if (auto dep_bt = db_get_struct<types::build_target>(dbi, txn, "bt:" + dep_name))
@@ -290,13 +310,13 @@ export namespace cppbuild
                 }
             }
         }
-        catch (const lmdbxx::error &)
+        catch (const lmdbxx::error &e)
         {
-            return;
+            std::cerr << "LMDB error in config_env (Step 1): " << e.what() << "\n";
+            std::exit(1);
         }
 
-        // Step 2: fetch dyndep_entry for this source, resolve its deps via deps.db,
-        // filtering by allowed_sources.
+        // Step 2: fetch dyndep_entry, build local name mapping, resolve direct deps
         types::dyndep_entry entry {};
         std::vector<std::filesystem::path> direct;
         try
@@ -304,47 +324,89 @@ export namespace cppbuild
             auto txn = lmdbxx::txn::begin(deps_env, nullptr, lmdbxx::env_flags::rdonly);
             auto dbi = lmdbxx::dbi::open(txn);
 
-            auto self_entry = db_get_struct<types::dyndep_entry>(dbi, txn, src_path.string());
+            auto load_entry = [&](const std::filesystem::path &p) -> std::optional<types::dyndep_entry> {
+                if (auto e = db_get_struct<types::dyndep_entry>(dbi, txn, p.string()))
+                    return e;
+                auto rel = p.lexically_relative(src_root);
+                if (auto e = db_get_struct<types::dyndep_entry>(dbi, txn, rel.string()))
+                    return e;
+                return std::nullopt;
+            };
+
+            auto self_entry = load_entry(src_path);
             if (!self_entry)
             {
-                return;
+                std::cerr << "FATAL: Could not find dyndep_entry in deps.db for: " << src_path.string() << "\n";
+                std::exit(1);
             }
             entry = std::move(*self_entry);
 
+            // FIX: Build the same local logical_name -> source_path map used by RSP generation!
+            std::unordered_map<std::string, std::filesystem::path> name_to_src;
+            for (auto const &candidate_str : allowed_sources)
+            {
+                std::filesystem::path candidate(candidate_str);
+                if (auto e = load_entry(candidate); e && !e->src.logical_name.empty())
+                {
+                    name_to_src.emplace(e->src.logical_name, candidate);
+                }
+            }
+
             for (auto const &logical_name : entry.deps)
             {
-                if (auto src = db_get_raw(dbi, txn, "n:" + logical_name))
+                if (auto it = name_to_src.find(logical_name); it != name_to_src.end())
                 {
-                    if (allowed_sources.contains(*src))
-                    {
-                        direct.emplace_back(*src);
-                    }
+                    direct.emplace_back(it->second);
                 }
             }
         }
-        catch (const lmdbxx::error &)
+        catch (const lmdbxx::error &e)
         {
-            return;
+            std::cerr << "LMDB error in deps_env (Step 2): " << e.what() << "\n";
+            std::exit(1);
         }
 
         // Step 3: generate the Ninja dyndep file.
-        auto dd_path = build_dir / (entry.src.source_path.filename().string() + ".dd");
+        auto base_output_path = calc_output_path(entry.src.source_path, src_root, build_dir);
+
+        auto dd_path = base_output_path;
+        dd_path += ".dd";
+
+        std::error_code ec;
+        std::filesystem::create_directories(dd_path.parent_path(), ec);
+        if (ec)
+        {
+            std::cerr << "FATAL: Failed to create directories for " << dd_path << ": " << ec.message() << "\n";
+            std::exit(1);
+        }
+
         std::ofstream dd(dd_path);
+        if (!dd)
+        {
+            std::cerr << "FATAL: Failed to open file for writing: " << dd_path << "\n";
+            std::exit(1);
+        }
+
         dd << "ninja_dyndep_version = 1\n";
+
         std::string dep_pcms;
         for (auto const &dep_src : direct)
         {
-            auto dep_pcm = build_dir / (dep_src.filename().string() + ".pcm");
+            auto dep_pcm = calc_output_path(dep_src, src_root, build_dir);
+            dep_pcm += ".pcm";
             dep_pcms += " " + dep_pcm.string();
         }
+
         if (!entry.src.logical_name.empty())
         {
-            auto pcm = build_dir / (entry.src.source_path.filename().string() + ".pcm");
+            auto pcm = base_output_path;
+            pcm += ".pcm";
             dd << "build " << pcm.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
         }
         else
         {
-            auto obj = build_dir / (entry.src.source_path.filename().string() + ".o");
+            auto obj = base_output_path;
+            obj += ".o";
             dd << "build " << obj.string() << ": dyndep" << (dep_pcms.empty() ? "" : " |" + dep_pcms) << "\n";
         }
     }
@@ -356,25 +418,27 @@ export namespace cppbuild
     {
         auto tc = types::toolchain::load(build_dir / "tc.cache");
 
-        // Step 1: find owner target, BFS deps transitively, collect allowed sources.
+        // Step 1: find owner, BFS deps transitively, collect allowed sources + src_root.
         types::build_target owner {};
         std::unordered_set<std::string> allowed_sources;
+        std::filesystem::path src_root;
         try
         {
             auto txn = lmdbxx::txn::begin(config_env, nullptr, lmdbxx::env_flags::rdonly);
             auto dbi = lmdbxx::dbi::open(txn);
 
+            auto sr = db_get_raw(dbi, txn, "src_root");
+            if (!sr)
+                return;
+            src_root = *sr;
+
             auto owner_name = db_get_raw(dbi, txn, "src:" + src_path.string());
             if (!owner_name)
-            {
                 return;
-            }
 
             auto owner_opt = db_get_struct<types::build_target>(dbi, txn, "bt:" + *owner_name);
             if (!owner_opt)
-            {
                 return;
-            }
             owner = std::move(*owner_opt);
 
             auto collect = [&](const types::build_target &bt) {
@@ -406,9 +470,7 @@ export namespace cppbuild
 
                 auto bt = db_get_struct<types::build_target>(dbi, txn, "bt:" + name);
                 if (!bt)
-                {
                     continue;
-                }
                 collect(*bt);
 
                 for (auto const &dep_name : bt->deps)
@@ -425,25 +487,41 @@ export namespace cppbuild
             return;
         }
 
-        // Step 2: build flag string from owner + toolchain.
+        // Step 2: build flag string from owner + toolchain, without empty gaps.
         bool is_c = src_path.extension() == ".c";
-        std::string content;
+        std::vector<std::string> all_flags;
+
+        auto add_flags = [&](const std::vector<std::string> &flags) {
+            for (const auto &flag : flags)
+            {
+                if (!flag.empty())
+                {
+                    all_flags.push_back(flag);
+                }
+            }
+        };
+
         if (is_c)
         {
-            content = fmt::format("{}\n{}\n{}\n",
-                                  fmt::join(tc.cflags, "\n"),
-                                  fmt::join(owner.cflags.public_, "\n"),
-                                  fmt::join(owner.cflags.private_, "\n"));
+            add_flags(tc.cflags);
+            add_flags(owner.cflags.public_);
+            add_flags(owner.cflags.private_);
         }
         else
         {
-            content = fmt::format("{}\n{}\n{}\n",
-                                  fmt::join(tc.cxxflags, "\n"),
-                                  fmt::join(owner.cxxflags.public_, "\n"),
-                                  fmt::join(owner.cxxflags.private_, "\n"));
+            add_flags(tc.cxxflags);
+            add_flags(owner.cxxflags.public_);
+            add_flags(owner.cxxflags.private_);
         }
 
-        // Step 3: BFS deps.db from src_path, filtering resolution by allowed_sources.
+        std::string content;
+        if (!all_flags.empty())
+        {
+            content = fmt::format("{}\n", fmt::join(all_flags, "\n"));
+        }
+
+        // Step 3: build a local logical_name -> source_path map restricted to allowed_sources,
+        // then BFS from src_path resolving via that map.
         if (!is_c)
         {
             try
@@ -455,13 +533,23 @@ export namespace cppbuild
                     return db_get_struct<types::dyndep_entry>(dbi, txn, src.string());
                 };
 
+                // Local name -> source map, scoped to reachable targets only.
+                std::unordered_map<std::string, std::filesystem::path> name_to_src;
+                for (auto const &candidate : allowed_sources)
+                {
+                    if (auto e = load_entry(candidate); e && !e->src.logical_name.empty())
+                    {
+                        name_to_src.emplace(e->src.logical_name, candidate);
+                    }
+                }
+
                 auto lookup_name = [&](const std::string &name) -> std::filesystem::path {
-                    auto src = db_get_raw(dbi, txn, "n:" + name);
-                    if (!src || !allowed_sources.contains(*src))
+                    auto it = name_to_src.find(name);
+                    if (it == name_to_src.end())
                     {
                         return {};
                     }
-                    return *src;
+                    return it->second;
                 };
 
                 std::unordered_set<std::string> visited;
@@ -489,11 +577,9 @@ export namespace cppbuild
                         continue;
                     }
 
-                    fmt::format_to(std::back_inserter(content),
-                                   "-fmodule-file={}={}/{}.pcm\n",
-                                   name,
-                                   build_dir.string(),
-                                   dep_src.filename().string());
+                    auto dep_pcm = calc_output_path(dep_src, src_root, build_dir);
+                    dep_pcm += ".pcm";
+                    fmt::format_to(std::back_inserter(content), "-fmodule-file={}={}\n", name, dep_pcm.string());
 
                     if (auto dep_entry = load_entry(dep_src); dep_entry)
                     {
@@ -513,7 +599,9 @@ export namespace cppbuild
             }
         }
 
-        auto rsp_path = build_dir / (src_path.filename().string() + ".rsp");
+        auto rsp_path = calc_output_path(src_path, src_root, build_dir);
+        rsp_path += ".rsp";
+        std::filesystem::create_directories(rsp_path.parent_path());
         auto out = fmt::output_file(rsp_path.string());
         out.print("{}", content);
     }

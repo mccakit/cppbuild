@@ -6,3 +6,4 @@ export import :types;
 export import :compdb;
 export import :ninja;
 export import :cache;
+export import :helpers;
