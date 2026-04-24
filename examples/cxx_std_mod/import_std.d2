@@ -1,0 +1,89 @@
+direction: right
+
+user: {
+  shape: person
+  label: "user"
+}
+
+tc_json: {
+  shape: document
+  label: "tc.json\n(compiler paths,\nflags, manifest ref)"
+}
+
+manifest: {
+  shape: document
+  label: "libc++.modules.json\n(system include dirs,\nstd.cppm path)"
+}
+
+register_cmd: {
+  label: "cppbuild toolchain\nregister"
+  shape: rectangle
+}
+
+register_cmd.parse: "types::toolchain::parse\n(reads tc.json)"
+register_cmd.precompile: "precompile_std\n(invokes clang++)"
+register_cmd.inject: "append -fmodule-file=std\nto cxxflags"
+register_cmd.serialize: "zpp::bits serialize"
+register_cmd.parse -> register_cmd.precompile
+register_cmd.precompile -> register_cmd.inject
+register_cmd.inject -> register_cmd.serialize
+
+clang: {
+  label: "clang++ --precompile"
+  shape: hexagon
+}
+
+cache_dir: {
+  label: "<exe_dir>/cache/"
+  shape: package
+
+  sqlite: {
+    shape: cylinder
+    label: "toolchains.db\n(SQLite)\nname TEXT PK\nblob BLOB"
+  }
+
+  pcms: {
+    shape: package
+    label: "pcms/<name>/"
+    std_pcm: {
+      shape: document
+      label: "std.pcm"
+    }
+  }
+}
+
+configure_cmd: {
+  label: "cppbuild configure"
+  shape: rectangle
+}
+
+configure_cmd.lookup: "get_toolchain(name)"
+configure_cmd.deserialize: "zpp::bits deserialize"
+configure_cmd.use: "tc drives\nninja generation"
+configure_cmd.lookup -> configure_cmd.deserialize
+configure_cmd.deserialize -> configure_cmd.use
+
+build_dir_tc_cache: {
+  shape: document
+  label: "build/tc.cache\n(per-build copy)"
+}
+
+ninja_edges: {
+  label: "ninja edges\n(compile, link, archive)"
+  shape: rectangle
+}
+
+# register flow
+user -> register_cmd: "--name X\n-T tc.json"
+tc_json -> register_cmd.parse
+register_cmd.precompile -> manifest: "reads"
+register_cmd.precompile -> clang: "runs"
+clang -> cache_dir.pcms.std_pcm: "writes"
+register_cmd.serialize -> cache_dir.sqlite: "INSERT OR REPLACE"
+
+# configure flow
+user -> configure_cmd: "--toolchain-name X\n(future; currently -T)"
+cache_dir.sqlite -> configure_cmd.lookup: "SELECT blob"
+configure_cmd.use -> build_dir_tc_cache: "tc.save"
+configure_cmd.use -> ninja_edges: "flags, paths"
+cache_dir.pcms.std_pcm -> ninja_edges: "referenced via\n-fmodule-file=std"

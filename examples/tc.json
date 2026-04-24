@@ -3,8 +3,49 @@
   "c_compiler": "/home/mccakit/dev/llvm/bin/clang",
   "archiver": "/home/mccakit/dev/llvm/bin/llvm-ar",
   "cxx_scanner": "/home/mccakit/dev/llvm/bin/clang-scan-deps",
-  "cxxflags": ["-std=c++26", "-O3", "-Wno-unused-command-line-argument"],
-  "cflags": ["-O3", "-Wno-unused-command-line-argument"],
-  "exe_ldflags": ["-fuse-ld=lld"],
-  "shared_ldflags": ["-fuse-ld=lld"]
+  "libcxx_modules_manifest": "/home/mccakit/dev/libcxx/native/lib/libc++.modules.json",
+  "cxxflags": [
+    "-std=c++26",
+    "-nostdinc++",
+    "-nostdlib++",
+    "-isystem", "/home/mccakit/dev/libcxx/native/include/c++/v1",
+    "-fPIC",
+    "-O3",
+    "-DNDEBUG",
+    "-Wno-c23-extensions",
+    "-Wno-reserved-module-identifier",
+    "-Werror=missing-field-initializers",
+    "-Wno-unused-command-line-argument"
+  ],
+  "cflags": [
+    "-std=gnu23",
+    "-fPIC",
+    "-O3",
+    "-DNDEBUG",
+    "-Wno-c23-extensions",
+    "-Wno-unused-command-line-argument"
+  ],
+  "arflags": [],
+  "exe_ldflags": [
+    "-fuse-ld=lld",
+    "-rtlib=compiler-rt",
+    "-nostdlib++",
+    "-L/home/mccakit/dev/libcxx/native/lib",
+    "-Wl,-Bstatic",
+    "-lunwind",
+    "-lc++abi",
+    "-lc++",
+    "-Wl,-Bdynamic"
+  ],
+  "shared_ldflags": [
+    "-fuse-ld=lld",
+    "-rtlib=compiler-rt",
+    "-nostdlib++",
+    "-L/home/mccakit/dev/libcxx/native/lib",
+    "-Wl,-Bstatic",
+    "-lunwind",
+    "-lc++abi",
+    "-lc++",
+    "-Wl,-Bdynamic"
+  ]
 }
