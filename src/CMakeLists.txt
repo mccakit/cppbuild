@@ -1,5 +1,7 @@
 find_package(PkgConfig REQUIRED)
 find_package(fmt REQUIRED)
+find_package(SQLiteCpp REQUIRED)
+
 pkg_check_modules(GRAAF REQUIRED IMPORTED_TARGET graaf)
 pkg_check_modules(UMKACXX REQUIRED IMPORTED_TARGET umkacxx)
 pkg_check_modules(SUBPROCESS REQUIRED IMPORTED_TARGET subprocess)
@@ -26,4 +28,5 @@ target_link_libraries(
         PkgConfig::ZPPBITS
         PkgConfig::THREAD_POOL
         PkgConfig::LMDBXX
+        SQLiteCpp
 )

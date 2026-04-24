@@ -7,3 +7,4 @@ export import :compdb;
 export import :ninja;
 export import :cache;
 export import :helpers;
+export import :toolchain_cache;
