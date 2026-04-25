@@ -1,5 +1,3 @@
-module;
-#include <SQLiteCpp/SQLiteCpp.h>
 export module cppbuild:toolchain_cache;
 import std;
 import fmt;
@@ -10,34 +8,9 @@ import :types;
 
 export namespace cppbuild
 {
-    auto cache_root(const std::filesystem::path &self_path) -> std::filesystem::path
-    {
-        auto root = self_path.parent_path() / "cache";
-        std::filesystem::create_directories(root);
-        return root;
-    }
-
-    auto cache_db_path(const std::filesystem::path &self_path) -> std::filesystem::path
-    {
-        return cache_root(self_path) / "toolchains.db";
-    }
-
-    auto cache_pcm_dir(const std::filesystem::path &self_path, const std::string &name) -> std::filesystem::path
-    {
-        return cache_root(self_path) / "pcms" / name;
-    }
-
-    auto open_cache_db(const std::filesystem::path &self_path) -> SQLite::Database
-    {
-        SQLite::Database db {cache_db_path(self_path).string(), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE};
-        db.exec("CREATE TABLE IF NOT EXISTS toolchains ("
-                "name TEXT PRIMARY KEY, "
-                "blob BLOB NOT NULL)");
-        return db;
-    }
-
     struct std_module_info
     {
+        public:
             std::filesystem::path source_path;
             std::vector<std::string> system_include_dirs;
     };
@@ -89,19 +62,14 @@ export namespace cppbuild
         return {};
     }
 
-    auto precompile_std(const types::toolchain &tc, const std::string &name, const std::filesystem::path &self_path)
-        -> std::filesystem::path
+    auto precompile_std(const types::toolchain &tc, const std::filesystem::path &out_pcm) -> bool
     {
         if (tc.libcxx_modules_manifest.empty())
         {
-            return {};
+            return false;
         }
 
         const auto info = read_std_module(tc.libcxx_modules_manifest);
-        const auto out_dir = cache_pcm_dir(self_path, name);
-        std::filesystem::remove_all(out_dir);
-        std::filesystem::create_directories(out_dir);
-        const auto out_pcm = out_dir / "std.pcm";
 
         std::vector<std::string> cmd;
         cmd.push_back(tc.cxx_compiler);
@@ -120,84 +88,61 @@ export namespace cppbuild
 
         fmt::println("precompiling std: {}", out_pcm.string());
         subprocess::run(cmd);
-        return out_pcm;
+        return true;
     }
 
-    auto register_toolchain(const std::string &name,
-                            const std::filesystem::path &tc_json,
-                            const std::filesystem::path &self_path) -> void
+    auto add_toolchain(const std::string &name,
+                       const std::filesystem::path &tc_json,
+                       const std::filesystem::path &self_path) -> void
     {
         types::toolchain tc {};
         tc.parse(tc_json);
 
-        if (auto pcm = precompile_std(tc, name, self_path); !pcm.empty())
+        const auto dir = self_path.parent_path() / "cache" / "toolchains" / name;
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+
+        const auto pcm_path = dir / "std.pcm";
+        if (precompile_std(tc, pcm_path))
         {
-            tc.cxxflags.push_back(fmt::format("-fmodule-file=std={}", pcm.string()));
+            tc.cxxflags.push_back(fmt::format("-fmodule-file=std={}", pcm_path.string()));
         }
 
         auto [blob, out] = zpp::bits::data_out();
         out(tc).or_throw();
 
-        auto db = open_cache_db(self_path);
-        SQLite::Statement stmt {db, "INSERT OR REPLACE INTO toolchains (name, blob) VALUES (?, ?)"};
-        stmt.bind(1, name);
-        stmt.bind(2, blob.data(), static_cast<int>(blob.size()));
-        stmt.exec();
+        std::ofstream ofs(dir / "toolchain.bin", std::ios::binary | std::ios::trunc);
+        ofs.write(reinterpret_cast<const char *>(blob.data()), static_cast<std::streamsize>(blob.size()));
 
-        fmt::println("registered toolchain '{}'", name);
-    }
-
-    auto get_toolchain(const std::string &name, const std::filesystem::path &self_path) -> types::toolchain
-    {
-        auto db = open_cache_db(self_path);
-        SQLite::Statement stmt {db, "SELECT blob FROM toolchains WHERE name = ?"};
-        stmt.bind(1, name);
-        stmt.executeStep();
-        auto col = stmt.getColumn(0);
-        const auto *bytes = static_cast<const std::byte *>(col.getBlob());
-        std::span<const std::byte> span {bytes, static_cast<std::size_t>(col.getBytes())};
-
-        types::toolchain tc {};
-        auto in = zpp::bits::in(span);
-        in(tc).or_throw();
-        return tc;
-    }
-
-    auto list_toolchains(const std::filesystem::path &self_path) -> void
-    {
-        auto db = open_cache_db(self_path);
-        SQLite::Statement stmt {db, "SELECT name FROM toolchains ORDER BY name"};
-        while (stmt.executeStep())
-        {
-            fmt::println("{}", stmt.getColumn(0).getString());
-        }
+        fmt::println("added toolchain '{}'", name);
     }
 
     auto remove_toolchain(const std::string &name, const std::filesystem::path &self_path) -> void
     {
-        auto db = open_cache_db(self_path);
-        SQLite::Statement stmt {db, "DELETE FROM toolchains WHERE name = ?"};
-        stmt.bind(1, name);
-        stmt.exec();
-
         std::error_code ec;
-        std::filesystem::remove_all(cache_pcm_dir(self_path, name), ec);
+        std::filesystem::remove_all(self_path.parent_path() / "cache" / "toolchains" / name, ec);
         fmt::println("removed toolchain '{}'", name);
     }
 
-    auto clear_toolchains(const std::filesystem::path &self_path) -> void
+    auto list_toolchains(const std::filesystem::path &self_path) -> void
     {
-        auto db = open_cache_db(self_path);
-        db.exec("DELETE FROM toolchains");
-        std::error_code ec;
-        std::filesystem::remove_all(cache_root(self_path) / "pcms", ec);
-        fmt::println("cleared all cached toolchains");
-    }
-
-    auto show_toolchain(const std::string &name, const std::filesystem::path &self_path) -> void
-    {
-        const auto tc = get_toolchain(name, self_path);
-        fmt::println("name: {}", name);
-        tc.print();
+        const auto root = self_path.parent_path() / "cache" / "toolchains";
+        if (!std::filesystem::exists(root))
+        {
+            return;
+        }
+        std::vector<std::string> names;
+        for (const auto &entry : std::filesystem::directory_iterator(root))
+        {
+            if (entry.is_directory() && std::filesystem::exists(entry.path() / "toolchain.bin"))
+            {
+                names.push_back(entry.path().filename().string());
+            }
+        }
+        std::ranges::sort(names);
+        for (const auto &n : names)
+        {
+            fmt::println("{}", n);
+        }
     }
 } // namespace cppbuild

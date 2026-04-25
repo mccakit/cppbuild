@@ -1,6 +1,5 @@
 find_package(PkgConfig REQUIRED)
 find_package(fmt REQUIRED)
-find_package(SQLiteCpp REQUIRED)
 pkg_check_modules(GRAAF REQUIRED IMPORTED_TARGET graaf)
 pkg_check_modules(CLI11 REQUIRED IMPORTED_TARGET cli11)
 pkg_check_modules(THREAD_POOL REQUIRED IMPORTED_TARGET thread_pool)
@@ -14,7 +13,6 @@ target_link_libraries(
         PkgConfig::CLI11
         PkgConfig::THREAD_POOL
         PkgConfig::LMDBXX
-        SQLiteCpp
 )
 target_include_directories(
     cppbuild
