@@ -10,12 +10,12 @@ pkg_check_modules(THREAD_POOL REQUIRED IMPORTED_TARGET thread_pool)
 pkg_check_modules(LMDBXX REQUIRED IMPORTED_TARGET lmdbxx)
 
 file(
-    GLOB_RECURSE cppbuild_srcs
+    GLOB_RECURSE srcs
     CONFIGURE_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/cppbuild/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
 )
 add_library(cppbuild_lib STATIC)
-target_sources(cppbuild_lib PUBLIC FILE_SET CXX_MODULES FILES ${cppbuild_srcs})
+target_sources(cppbuild_lib PUBLIC FILE_SET CXX_MODULES FILES ${srcs})
 target_link_libraries(
     cppbuild_lib
     PUBLIC

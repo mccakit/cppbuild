@@ -1,6 +1,6 @@
 [requires]
 fmt/master
-neograaf/main
+graaf/main
 umkacxx/main
 cli11/main
 subprocess/main
