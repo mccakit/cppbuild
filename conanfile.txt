@@ -1,5 +1,5 @@
 [requires]
-fmt/master
+fmt/libcxx-fix
 graaf/main
 umkacxx/main
 cli11/main
