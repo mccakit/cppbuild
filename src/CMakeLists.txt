@@ -1,30 +1,29 @@
-find_package(PkgConfig REQUIRED)
 find_package(fmt REQUIRED)
-
-pkg_check_modules(GRAAF REQUIRED IMPORTED_TARGET graaf)
-pkg_check_modules(UMKACXX REQUIRED IMPORTED_TARGET umkacxx)
-pkg_check_modules(SUBPROCESS REQUIRED IMPORTED_TARGET subprocess)
-pkg_check_modules(GLAZE REQUIRED IMPORTED_TARGET glaze)
-pkg_check_modules(ZPPBITS REQUIRED IMPORTED_TARGET zppbits)
-pkg_check_modules(THREAD_POOL REQUIRED IMPORTED_TARGET thread_pool)
-pkg_check_modules(LMDBXX REQUIRED IMPORTED_TARGET lmdbxx)
-
+find_package(graaf REQUIRED)
+find_package(umkacxx REQUIRED)
+find_package(subprocess REQUIRED)
+find_package(glaze REQUIRED)
+find_package(thread_pool REQUIRED)
+find_package(lmdbxx REQUIRED)
+find_package(zppbits REQUIRED)
+find_package(cli11 REQUIRED)
 file(
     GLOB_RECURSE srcs
     CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
 )
-add_library(cppbuild_lib STATIC)
-target_sources(cppbuild_lib PUBLIC FILE_SET CXX_MODULES FILES ${srcs})
+add_library(cppbuild_library)
+target_sources(cppbuild_library PUBLIC FILE_SET CXX_MODULES FILES ${srcs})
 target_link_libraries(
-    cppbuild_lib
+    cppbuild_library
     PUBLIC
-        fmt::fmt-module
-        PkgConfig::GRAAF
-        PkgConfig::UMKACXX
-        PkgConfig::SUBPROCESS
-        PkgConfig::GLAZE
-        PkgConfig::ZPPBITS
-        PkgConfig::THREAD_POOL
-        PkgConfig::LMDBXX
+        fmt::cxx_module
+        graaf::cxx_module
+        umkacxx::cxx_module
+        subprocess::cxx_module
+        glaze::cxx_module
+        thread_pool::cxx_module
+        lmdbxx::cxx_module
+        zppbits::cxx_module
+        cli11::cxx_module
 )

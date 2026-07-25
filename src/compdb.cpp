@@ -6,7 +6,7 @@ import fmt;
 import subprocess;
 import glaze;
 import bs.thread_pool;
-import lmdbxx;
+import lmdb;
 import :types;
 import :cache;
 import :helpers;
@@ -126,11 +126,11 @@ export namespace cppbuild
 
     auto scan_single_source(const std::filesystem::path &db_path,
                             const std::filesystem::path &build_dir,
-                            lmdbxx::env &deps_env,
-                            lmdbxx::env &config_env) -> void
+                            lmdb::env &deps_env,
+                            lmdb::env &config_env) -> void
     {
-        auto txn = lmdbxx::txn::begin(config_env, nullptr, lmdbxx::env_flags::rdonly);
-        auto dbi = lmdbxx::dbi::open(txn);
+        auto txn = lmdb::txn::begin(config_env, nullptr, lmdb::env_flags::rdonly);
+        auto dbi = lmdb::dbi::open(txn);
 
         auto src_root = *db_get_raw(dbi, txn, "src_root");
         auto tc = *db_get_struct<types::toolchain>(dbi, txn, "toolchain");
@@ -185,8 +185,8 @@ export namespace cppbuild
             }
         }
 
-        auto deps_txn = lmdbxx::txn::begin(deps_env);
-        auto deps_dbi = lmdbxx::dbi::open(deps_txn);
+        auto deps_txn = lmdb::txn::begin(deps_env);
+        auto deps_dbi = lmdb::dbi::open(deps_txn);
         db_put_struct(deps_dbi, deps_txn, entry.src.source_path.string(), entry);
         deps_txn.commit();
 
@@ -199,13 +199,13 @@ export namespace cppbuild
         std::ofstream {stamp_path};
     }
 
-    auto collect_allowed_sources(const std::filesystem::path &src_path, lmdbxx::env &config_env)
+    auto collect_allowed_sources(const std::filesystem::path &src_path, lmdb::env &config_env)
         -> std::tuple<std::filesystem::path, types::toolchain, types::build_target, std::unordered_set<std::string>>
     {
         std::unordered_set<std::string> allowed_sources;
 
-        auto txn = lmdbxx::txn::begin(config_env, nullptr, lmdbxx::env_flags::rdonly);
-        auto dbi = lmdbxx::dbi::open(txn);
+        auto txn = lmdb::txn::begin(config_env, nullptr, lmdb::env_flags::rdonly);
+        auto dbi = lmdb::dbi::open(txn);
 
         auto src_root = *db_get_raw(dbi, txn, "src_root");
         auto tc = *db_get_struct<types::toolchain>(dbi, txn, "toolchain");
@@ -270,10 +270,10 @@ export namespace cppbuild
     auto find_direct_deps(const std::filesystem::path &src_path,
                           const std::filesystem::path &src_root,
                           const std::unordered_set<std::string> &allowed_sources,
-                          lmdbxx::env &deps_env) -> std::pair<types::dyndep_entry, std::vector<std::filesystem::path>>
+                          lmdb::env &deps_env) -> std::pair<types::dyndep_entry, std::vector<std::filesystem::path>>
     {
-        auto txn = lmdbxx::txn::begin(deps_env, nullptr, lmdbxx::env_flags::rdonly);
-        auto dbi = lmdbxx::dbi::open(txn);
+        auto txn = lmdb::txn::begin(deps_env, nullptr, lmdb::env_flags::rdonly);
+        auto dbi = lmdb::dbi::open(txn);
 
         auto load_entry = [&](const std::filesystem::path &p) -> types::dyndep_entry {
             if (auto e = db_get_struct<types::dyndep_entry>(dbi, txn, p.string()))
@@ -348,10 +348,10 @@ export namespace cppbuild
                               const std::filesystem::path &src_root,
                               const std::filesystem::path &build_dir,
                               const std::unordered_set<std::string> &allowed_sources,
-                              lmdbxx::env &deps_env) -> std::string
+                              lmdb::env &deps_env) -> std::string
     {
-        auto txn = lmdbxx::txn::begin(deps_env, nullptr, lmdbxx::env_flags::rdonly);
-        auto dbi = lmdbxx::dbi::open(txn);
+        auto txn = lmdb::txn::begin(deps_env, nullptr, lmdb::env_flags::rdonly);
+        auto dbi = lmdb::dbi::open(txn);
 
         auto load_entry = [&](const std::filesystem::path &src) {
             return db_get_struct<types::dyndep_entry>(dbi, txn, src.string());
@@ -413,8 +413,8 @@ export namespace cppbuild
 
     auto generate_single_dyndep(const std::filesystem::path &src_path,
                                 const std::filesystem::path &build_dir,
-                                lmdbxx::env &deps_env,
-                                lmdbxx::env &config_env) -> void
+                                lmdb::env &deps_env,
+                                lmdb::env &config_env) -> void
     {
         auto [src_root, tc, owner, allowed_sources] = collect_allowed_sources(src_path, config_env);
         auto [entry, direct] = find_direct_deps(src_path, src_root, allowed_sources, deps_env);
@@ -451,8 +451,8 @@ export namespace cppbuild
 
     auto generate_single_rsp(const std::filesystem::path &src_path,
                              const std::filesystem::path &build_dir,
-                             lmdbxx::env &deps_env,
-                             lmdbxx::env &config_env) -> void
+                             lmdb::env &deps_env,
+                             lmdb::env &config_env) -> void
     {
         auto [src_root, tc, owner, allowed_sources] = collect_allowed_sources(src_path, config_env);
         std::string content = build_flag_string(src_path, tc, owner);

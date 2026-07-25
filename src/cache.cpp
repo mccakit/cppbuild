@@ -1,7 +1,7 @@
 module;
 export module cppbuild:cache;
 import std;
-import lmdbxx;
+import lmdb;
 import zpp.bits;
 import fmt;
 import :types;
@@ -12,38 +12,38 @@ export namespace cppbuild
     {
         try
         {
-            auto env = lmdbxx::env::create();
+            auto env = lmdb::env::create();
             env.set_mapsize(default_db_mapsize);
             // MDB_NOSYNC and MDB_NOMETASYNC completely remove the fsync() bottleneck
             env.open(db_path,
-                     lmdbxx::env_flags::no_subdir | lmdbxx::env_flags::no_sync | lmdbxx::env_flags::no_meta_sync,
+                     lmdb::env_flags::no_subdir | lmdb::env_flags::no_sync | lmdb::env_flags::no_meta_sync,
                      0644);
-            auto txn = lmdbxx::txn::begin(env);
-            auto dbi = lmdbxx::dbi::open(txn, nullptr, lmdbxx::db_flags::create);
+            auto txn = lmdb::txn::begin(env);
+            auto dbi = lmdb::dbi::open(txn, nullptr, lmdb::db_flags::create);
             txn.commit();
         }
-        catch (const lmdbxx::error &e)
+        catch (const lmdb::error &e)
         {
             std::println(
                 std::cerr, "Failed to initialize database {}: {} (code: {})", db_path.string(), e.what(), e.code());
             std::exit(1);
         }
     }
-    auto load_db(const std::filesystem::path &db_path, lmdbxx::env_flags additional_flags = lmdbxx::env_flags::none)
-        -> lmdbxx::env
+    auto load_db(const std::filesystem::path &db_path, lmdb::env_flags additional_flags = lmdb::env_flags::none)
+        -> lmdb::env
     {
-        auto env = lmdbxx::env::create();
+        auto env = lmdb::env::create();
         env.set_mapsize(default_db_mapsize);
         // MDB_NOSYNC and MDB_NOMETASYNC completely remove the fsync() bottleneck
         env.open(db_path,
-                 lmdbxx::env_flags::no_subdir | lmdbxx::env_flags::no_sync | lmdbxx::env_flags::no_meta_sync |
+                 lmdb::env_flags::no_subdir | lmdb::env_flags::no_sync | lmdb::env_flags::no_meta_sync |
                      additional_flags,
                  0644);
         return env;
     }
 
     template <typename T>
-    auto db_put_struct(lmdbxx::dbi &db, lmdbxx::txn &txn, std::string_view key, const T &value) -> void
+    auto db_put_struct(lmdb::dbi &db, lmdb::txn &txn, std::string_view key, const T &value) -> void
     {
         auto [data, out] = zpp::bits::data_out();
         out(value).or_throw();
@@ -52,7 +52,7 @@ export namespace cppbuild
     }
 
     template <typename T>
-    auto db_get_struct(lmdbxx::dbi &db, lmdbxx::txn &txn, std::string_view key) -> std::optional<T>
+    auto db_get_struct(lmdb::dbi &db, lmdb::txn &txn, std::string_view key) -> std::optional<T>
     {
         std::string_view sv;
         if (!db.get(txn, key, sv))
@@ -64,12 +64,12 @@ export namespace cppbuild
         return value;
     }
 
-    auto db_put_raw(lmdbxx::dbi &db, lmdbxx::txn &txn, std::string_view key, std::string_view value) -> void
+    auto db_put_raw(lmdb::dbi &db, lmdb::txn &txn, std::string_view key, std::string_view value) -> void
     {
         db.put(txn, key, value);
     }
 
-    auto db_get_raw(lmdbxx::dbi &db, lmdbxx::txn &txn, std::string_view key) -> std::optional<std::string>
+    auto db_get_raw(lmdb::dbi &db, lmdb::txn &txn, std::string_view key) -> std::optional<std::string>
     {
         std::string_view sv;
         if (!db.get(txn, key, sv))

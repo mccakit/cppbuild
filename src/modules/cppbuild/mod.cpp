@@ -1,7 +1,7 @@
 module;
 export module cppbuild:modules_cppbuild;
 import std;
-import umkacxx;
+import umka;
 
 constexpr char src[] = {
 #embed "mod.um"
@@ -10,8 +10,8 @@ constexpr char src[] = {
 struct source_files_umka
 {
     public:
-        umkacxx::types::str_t kind;
-        umkacxx::types::arr_t<umkacxx::types::str_t> srcs;
+        umka::str_t kind;
+        umka::arr_t<umka::str_t> srcs;
 };
 class source_files_cxx
 {
@@ -27,8 +27,8 @@ class source_files_cxx
 struct gen_output_umka
 {
     public:
-        umkacxx::types::str_t path;
-        umkacxx::types::str_t kind;
+        umka::str_t path;
+        umka::str_t kind;
 };
 
 struct gen_output_cxx
@@ -45,9 +45,9 @@ struct gen_output_cxx
 struct gen_src_umka
 {
     public:
-        umkacxx::types::arr_t<umkacxx::types::str_t> command;
-        umkacxx::types::arr_t<umkacxx::types::str_t> inputs;
-        umkacxx::types::arr_t<gen_output_umka> outputs;
+        umka::arr_t<umka::str_t> command;
+        umka::arr_t<umka::str_t> inputs;
+        umka::arr_t<gen_output_umka> outputs;
 };
 
 struct gen_src_cxx
@@ -73,8 +73,8 @@ struct gen_src_cxx
 struct cxx_flags_umka
 {
     public:
-        umkacxx::types::arr_t<umkacxx::types::str_t> public_;
-        umkacxx::types::arr_t<umkacxx::types::str_t> private_;
+        umka::arr_t<umka::str_t> public_;
+        umka::arr_t<umka::str_t> private_;
 };
 
 struct cxx_flags_cxx
@@ -93,8 +93,8 @@ struct cxx_flags_cxx
 struct c_flags_umka
 {
     public:
-        umkacxx::types::arr_t<umkacxx::types::str_t> public_;
-        umkacxx::types::arr_t<umkacxx::types::str_t> private_;
+        umka::arr_t<umka::str_t> public_;
+        umka::arr_t<umka::str_t> private_;
 };
 
 struct c_flags_cxx
@@ -113,10 +113,10 @@ struct c_flags_cxx
 struct build_target_umka
 {
     public:
-        umkacxx::types::str_t name;
-        umkacxx::types::arr_t<source_files_umka> srcs;
-        umkacxx::types::arr_t<gen_src_umka> gen_groups;
-        umkacxx::types::arr_t<umkacxx::types::str_t> deps;
+        umka::str_t name;
+        umka::arr_t<source_files_umka> srcs;
+        umka::arr_t<gen_src_umka> gen_groups;
+        umka::arr_t<umka::str_t> deps;
         cxx_flags_umka cxxflags;
         c_flags_umka cflags;
 };
@@ -154,9 +154,9 @@ struct build_target_cxx
 struct archive_target_umka
 {
     public:
-        umkacxx::types::str_t name;
-        umkacxx::types::arr_t<umkacxx::types::str_t> deps;
-        umkacxx::types::arr_t<umkacxx::types::str_t> arflags;
+        umka::str_t name;
+        umka::arr_t<umka::str_t> deps;
+        umka::arr_t<umka::str_t> arflags;
 };
 
 struct archive_target_cxx
@@ -176,10 +176,10 @@ struct archive_target_cxx
 struct link_target_umka
 {
     public:
-        umkacxx::types::str_t name;
-        umkacxx::types::str_t kind;
-        umkacxx::types::arr_t<umkacxx::types::str_t> deps;
-        umkacxx::types::arr_t<umkacxx::types::str_t> ldflags;
+        umka::str_t name;
+        umka::str_t kind;
+        umka::arr_t<umka::str_t> deps;
+        umka::arr_t<umka::str_t> ldflags;
 };
 
 struct link_target_cxx
@@ -200,12 +200,12 @@ struct link_target_cxx
 struct install_target_umka
 {
     public:
-        umkacxx::types::str_t name;
-        umkacxx::types::str_t install_dir;
-        umkacxx::types::arr_t<umkacxx::types::str_t> files;
-        umkacxx::types::arr_t<umkacxx::types::str_t> build_targets;
-        umkacxx::types::arr_t<umkacxx::types::str_t> archive_targets;
-        umkacxx::types::arr_t<umkacxx::types::str_t> link_targets;
+        umka::str_t name;
+        umka::str_t install_dir;
+        umka::arr_t<umka::str_t> files;
+        umka::arr_t<umka::str_t> build_targets;
+        umka::arr_t<umka::str_t> archive_targets;
+        umka::arr_t<umka::str_t> link_targets;
 };
 
 struct install_target_cxx
@@ -229,15 +229,15 @@ struct install_target_cxx
 
 export namespace cppbuild::modules_cppbuild
 {
-    umkacxx::types::module_t mod {"cppbuild.um", src, {}};
+    umka::module_t mod {"cppbuild.um", src, {}};
 
     struct results_umka
     {
         public:
-            umkacxx::types::arr_t<build_target_umka> build_targets;
-            umkacxx::types::arr_t<archive_target_umka> archive_targets;
-            umkacxx::types::arr_t<link_target_umka> link_targets;
-            umkacxx::types::arr_t<install_target_umka> install_targets;
+            umka::arr_t<build_target_umka> build_targets;
+            umka::arr_t<archive_target_umka> archive_targets;
+            umka::arr_t<link_target_umka> link_targets;
+            umka::arr_t<install_target_umka> install_targets;
     };
 
     struct results_cxx
@@ -248,7 +248,7 @@ export namespace cppbuild::modules_cppbuild
             std::vector<link_target_cxx> link_targets {};
             std::vector<install_target_cxx> install_targets {};
 
-            results_cxx(umkacxx::types::vm_handle vm, results_umka raw)
+            results_cxx(results_umka raw)
             {
                 auto blen = raw.build_targets.len();
                 build_targets.reserve(blen);
@@ -256,7 +256,7 @@ export namespace cppbuild::modules_cppbuild
                 {
                     build_targets.emplace_back(raw.build_targets.data[i]);
                 }
-                raw.build_targets.decref(vm);
+                raw.build_targets.decref();
 
                 auto alen = raw.archive_targets.len();
                 archive_targets.reserve(alen);
@@ -264,7 +264,7 @@ export namespace cppbuild::modules_cppbuild
                 {
                     archive_targets.emplace_back(raw.archive_targets.data[i]);
                 }
-                raw.archive_targets.decref(vm);
+                raw.archive_targets.decref();
 
                 auto llen = raw.link_targets.len();
                 link_targets.reserve(llen);
@@ -272,7 +272,7 @@ export namespace cppbuild::modules_cppbuild
                 {
                     link_targets.emplace_back(raw.link_targets.data[i]);
                 }
-                raw.link_targets.decref(vm);
+                raw.link_targets.decref();
 
                 auto ilen = raw.install_targets.len();
                 install_targets.reserve(ilen);
@@ -280,7 +280,7 @@ export namespace cppbuild::modules_cppbuild
                 {
                     install_targets.emplace_back(raw.install_targets.data[i]);
                 }
-                raw.install_targets.decref(vm);
+                raw.install_targets.decref();
             }
 
             auto print() const -> void
