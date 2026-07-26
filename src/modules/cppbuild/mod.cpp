@@ -13,12 +13,14 @@ struct source_files_umka
         umka::str_t kind;
         umka::arr_t<umka::str_t> srcs;
 };
+
 class source_files_cxx
 {
     public:
         std::string kind {};
         std::vector<std::filesystem::path> srcs;
-        source_files_cxx(const source_files_umka &raw)
+
+        explicit source_files_cxx(const source_files_umka &raw)
             : kind {raw.kind ? raw.kind : ""}, srcs {raw.srcs.data, raw.srcs.data + raw.srcs.len()}
         {
         }
@@ -37,7 +39,8 @@ struct gen_output_cxx
         std::filesystem::path path {};
         std::string kind {};
 
-        gen_output_cxx(const gen_output_umka &raw) : path {raw.path ? raw.path : ""}, kind {raw.kind ? raw.kind : ""}
+        explicit gen_output_cxx(const gen_output_umka &raw)
+            : path {raw.path ? raw.path : ""}, kind {raw.kind ? raw.kind : ""}
         {
         }
 };
@@ -57,13 +60,13 @@ struct gen_src_cxx
         std::vector<std::filesystem::path> inputs {};
         std::vector<gen_output_cxx> outputs {};
 
-        gen_src_cxx(const gen_src_umka &raw)
+        explicit gen_src_cxx(const gen_src_umka &raw)
             : command {raw.command.data, raw.command.data + raw.command.len()},
               inputs {raw.inputs.data, raw.inputs.data + raw.inputs.len()}
         {
-            auto len = raw.outputs.len();
-            outputs.reserve(len);
-            for (int i = 0; i < len; ++i)
+            const auto len = raw.outputs.len();
+            outputs.reserve(static_cast<std::size_t>(len));
+            for (umka::int_t i = 0; i < len; ++i)
             {
                 outputs.emplace_back(raw.outputs.data[i]);
             }
@@ -82,8 +85,9 @@ struct cxx_flags_cxx
     public:
         std::vector<std::string> public_ {};
         std::vector<std::string> private_ {};
+
         cxx_flags_cxx() = default;
-        cxx_flags_cxx(const cxx_flags_umka &raw)
+        explicit cxx_flags_cxx(const cxx_flags_umka &raw)
             : public_ {raw.public_.data, raw.public_.data + raw.public_.len()},
               private_ {raw.private_.data, raw.private_.data + raw.private_.len()}
         {
@@ -102,8 +106,9 @@ struct c_flags_cxx
     public:
         std::vector<std::string> public_ {};
         std::vector<std::string> private_ {};
+
         c_flags_cxx() = default;
-        c_flags_cxx(const c_flags_umka &raw)
+        explicit c_flags_cxx(const c_flags_umka &raw)
             : public_ {raw.public_.data, raw.public_.data + raw.public_.len()},
               private_ {raw.private_.data, raw.private_.data + raw.private_.len()}
         {
@@ -131,20 +136,20 @@ struct build_target_cxx
         cxx_flags_cxx cxxflags {};
         c_flags_cxx cflags {};
 
-        build_target_cxx(const build_target_umka &raw)
+        explicit build_target_cxx(const build_target_umka &raw)
             : name {raw.name ? raw.name : ""}, deps {raw.deps.data, raw.deps.data + raw.deps.len()},
               cxxflags {raw.cxxflags}, cflags {raw.cflags}
         {
-            auto slen = raw.srcs.len();
-            srcs.reserve(slen);
-            for (int i = 0; i < slen; ++i)
+            const auto slen = raw.srcs.len();
+            srcs.reserve(static_cast<std::size_t>(slen));
+            for (umka::int_t i = 0; i < slen; ++i)
             {
                 srcs.emplace_back(raw.srcs.data[i]);
             }
 
-            auto glen = raw.gen_groups.len();
-            gen_groups.reserve(glen);
-            for (int i = 0; i < glen; ++i)
+            const auto glen = raw.gen_groups.len();
+            gen_groups.reserve(static_cast<std::size_t>(glen));
+            for (umka::int_t i = 0; i < glen; ++i)
             {
                 gen_groups.emplace_back(raw.gen_groups.data[i]);
             }
@@ -166,7 +171,7 @@ struct archive_target_cxx
         std::vector<std::string> deps {};
         std::vector<std::string> arflags {};
 
-        archive_target_cxx(const archive_target_umka &raw)
+        explicit archive_target_cxx(const archive_target_umka &raw)
             : name {raw.name ? raw.name : ""}, deps {raw.deps.data, raw.deps.data + raw.deps.len()},
               arflags {raw.arflags.data, raw.arflags.data + raw.arflags.len()}
         {
@@ -189,7 +194,8 @@ struct link_target_cxx
         std::string kind {};
         std::vector<std::string> deps {};
         std::vector<std::string> ldflags {};
-        link_target_cxx(const link_target_umka &raw)
+
+        explicit link_target_cxx(const link_target_umka &raw)
             : name {raw.name ? raw.name : ""}, kind {raw.kind ? raw.kind : ""},
               deps {raw.deps.data, raw.deps.data + raw.deps.len()},
               ldflags {raw.ldflags.data, raw.ldflags.data + raw.ldflags.len()}
@@ -217,7 +223,8 @@ struct install_target_cxx
         std::vector<std::string> build_targets {};
         std::vector<std::string> archive_targets {};
         std::vector<std::string> link_targets {};
-        install_target_cxx(const install_target_umka &raw)
+
+        explicit install_target_cxx(const install_target_umka &raw)
             : name {raw.name ? raw.name : ""}, install_dir {raw.install_dir ? raw.install_dir : ""},
               files {raw.files.data, raw.files.data + raw.files.len()},
               build_targets {raw.build_targets.data, raw.build_targets.data + raw.build_targets.len()},
@@ -248,57 +255,61 @@ export namespace cppbuild::modules_cppbuild
             std::vector<link_target_cxx> link_targets {};
             std::vector<install_target_cxx> install_targets {};
 
-            results_cxx(results_umka raw)
+            // The wrapper never releases anything implicitly, so the four
+            // top-level arrays are released here once their contents have been
+            // copied out. Releasing an outer array releases the inner ones too,
+            // which is why only these four are named.
+            results_cxx(const umka::vm_t &vm, results_umka raw)
             {
-                auto blen = raw.build_targets.len();
-                build_targets.reserve(blen);
-                for (int i = 0; i < blen; ++i)
+                const auto blen = raw.build_targets.len();
+                build_targets.reserve(static_cast<std::size_t>(blen));
+                for (umka::int_t i = 0; i < blen; ++i)
                 {
                     build_targets.emplace_back(raw.build_targets.data[i]);
                 }
-                raw.build_targets.decref();
+                vm.decref(raw.build_targets);
 
-                auto alen = raw.archive_targets.len();
-                archive_targets.reserve(alen);
-                for (int i = 0; i < alen; ++i)
+                const auto alen = raw.archive_targets.len();
+                archive_targets.reserve(static_cast<std::size_t>(alen));
+                for (umka::int_t i = 0; i < alen; ++i)
                 {
                     archive_targets.emplace_back(raw.archive_targets.data[i]);
                 }
-                raw.archive_targets.decref();
+                vm.decref(raw.archive_targets);
 
-                auto llen = raw.link_targets.len();
-                link_targets.reserve(llen);
-                for (int i = 0; i < llen; ++i)
+                const auto llen = raw.link_targets.len();
+                link_targets.reserve(static_cast<std::size_t>(llen));
+                for (umka::int_t i = 0; i < llen; ++i)
                 {
                     link_targets.emplace_back(raw.link_targets.data[i]);
                 }
-                raw.link_targets.decref();
+                vm.decref(raw.link_targets);
 
-                auto ilen = raw.install_targets.len();
-                install_targets.reserve(ilen);
-                for (int i = 0; i < ilen; ++i)
+                const auto ilen = raw.install_targets.len();
+                install_targets.reserve(static_cast<std::size_t>(ilen));
+                for (umka::int_t i = 0; i < ilen; ++i)
                 {
                     install_targets.emplace_back(raw.install_targets.data[i]);
                 }
-                raw.install_targets.decref();
+                vm.decref(raw.install_targets);
             }
 
             auto print() const -> void
             {
                 std::println("=== Build Targets ({}) ===", build_targets.size());
-                for (auto &bt : build_targets)
+                for (const auto &bt : build_targets)
                 {
                     std::println("  name: {}", bt.name);
                     std::println("  deps: {}", bt.deps.size());
-                    for (auto &d : bt.deps)
+                    for (const auto &d : bt.deps)
                     {
                         std::println("    - {}", d);
                     }
                     std::println("  srcs: {}", bt.srcs.size());
-                    for (auto &sf : bt.srcs)
+                    for (const auto &sf : bt.srcs)
                     {
                         std::println("    kind: {}", sf.kind);
-                        for (auto &s : sf.srcs)
+                        for (const auto &s : sf.srcs)
                         {
                             std::println("      - {}", s.string());
                         }
@@ -306,38 +317,38 @@ export namespace cppbuild::modules_cppbuild
                 }
 
                 std::println("=== Archive Targets ({}) ===", archive_targets.size());
-                for (auto &at : archive_targets)
+                for (const auto &at : archive_targets)
                 {
                     std::println("  name: {}", at.name);
-                    for (auto &d : at.deps)
+                    for (const auto &d : at.deps)
                     {
                         std::println("    - {}", d);
                     }
                 }
 
                 std::println("=== Link Targets ({}) ===", link_targets.size());
-                for (auto &lt : link_targets)
+                for (const auto &lt : link_targets)
                 {
                     std::println("  name: {}", lt.name);
-                    for (auto &d : lt.deps)
+                    for (const auto &d : lt.deps)
                     {
                         std::println("    - {}", d);
                     }
                 }
 
                 std::println("=== Install Targets ({}) ===", install_targets.size());
-                for (auto &it : install_targets)
+                for (const auto &it : install_targets)
                 {
                     std::println("  install_dir: {}", it.install_dir.string());
-                    for (auto &bt : it.build_targets)
+                    for (const auto &bt : it.build_targets)
                     {
                         std::println("    build: {}", bt);
                     }
-                    for (auto &at : it.archive_targets)
+                    for (const auto &at : it.archive_targets)
                     {
                         std::println("    archive: {}", at);
                     }
-                    for (auto &lt : it.link_targets)
+                    for (const auto &lt : it.link_targets)
                     {
                         std::println("    link: {}", lt);
                     }
