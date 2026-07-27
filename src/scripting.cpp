@@ -16,7 +16,7 @@ export namespace cppbuild
             umka::fn_t set_config;
             umka::fn_t configure;
 
-            // Stack size is counted in slots, not bytes: this is 16 MiB.
+            // Stack size is counted in slots, not bytes: this is 2 MiB.
             explicit script(const std::filesystem::path &script_path)
                 : vm {script_path, 2 * 1024 * 1024, {modules_cppbuild::mod}},
                   set_config {vm.function("cppbuild.um", "set_config")},

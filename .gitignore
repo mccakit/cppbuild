@@ -6,3 +6,4 @@ build/
 /conan/
 /build/
 __cmake*
+.cache/
