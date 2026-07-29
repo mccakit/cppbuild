@@ -1,11 +1,11 @@
 find_package(fmt REQUIRED)
 find_package(graaf REQUIRED)
 find_package(umkacxx REQUIRED)
-find_package(subprocess REQUIRED)
+find_package(benman64-subprocess REQUIRED)
 find_package(glaze REQUIRED)
-find_package(thread_pool REQUIRED)
+find_package(bs-thread_pool REQUIRED)
 find_package(lmdbxx REQUIRED)
-find_package(zppbits REQUIRED)
+find_package(zpp-bits REQUIRED)
 find_package(cli11 REQUIRED)
 file(
     GLOB_RECURSE srcs
@@ -20,10 +20,10 @@ target_link_libraries(
         fmt::cxx_module
         graaf::cxx_module
         umkacxx::cxx_module
-        subprocess::cxx_module
+        benman64-subprocess::cxx_module
         glaze::cxx_module
-        thread_pool::cxx_module
+        bs-thread_pool::cxx_module
         lmdbxx::cxx_module
-        zppbits::cxx_module
+        zpp-bits::cxx_module
         cli11::cxx_module
 )

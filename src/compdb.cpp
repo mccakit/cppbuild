@@ -135,14 +135,20 @@ export namespace cppbuild
         auto src_root = *db_get_raw(dbi, txn, "src_root");
         auto tc = *db_get_struct<types::toolchain>(dbi, txn, "toolchain");
 
-        auto proc =
-            subprocess::RunBuilder({tc.cxx_scanner, "--format=p1689", "-compilation-database", db_path.string()})
-                .cout(subprocess::PipeOption::pipe)
+        auto scan =
+            subprocess::run_builder_t({tc.cxx_scanner, "--format=p1689", "-compilation-database", db_path.string()})
+                .cout(subprocess::pipe_option_t::pipe)
+                .cerr(subprocess::pipe_option_t::pipe)
                 .run();
 
-        std::string output(proc.cout.begin(), proc.cout.end());
+        if (!scan)
+        {
+            throw std::runtime_error(fmt::format(
+                "{} failed ({}) scanning {}:\n{}", tc.cxx_scanner, scan.returncode, db_path.string(), scan.cerr));
+        }
+
         glz::generic doc {};
-        glz::read_json(doc, output);
+        glz::read_json(doc, scan.cout);
 
         auto &obj = doc.get<glz::generic::object_t>();
         types::dyndep_entry entry {};
